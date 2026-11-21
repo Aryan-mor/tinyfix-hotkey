@@ -29,3 +29,4 @@ demo/.cache/
 secrets.dpapi
 prompt_fix.txt
 prompt_translate.txt
+skills.json

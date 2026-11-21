@@ -12,6 +12,7 @@ from typing import Callable
 from hotkey_util import (
     DEFAULT_HOTKEY,
     DEFAULT_HOTKEY_ALL,
+    DEFAULT_HOTKEY_MENU,
     DEFAULT_HOTKEY_TRANSLATE,
     KEY_CHOICES,
     Hotkey,
@@ -29,6 +30,18 @@ from llm_client import (
     sanitize_error,
 )
 from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
+from skills import (
+    INPUT_SELECT_ALL,
+    INPUT_SELECTION,
+    SKILL_FIX,
+    SKILL_FIX_ALL,
+    SKILL_TRANSLATE,
+    Skill,
+    default_skills,
+    duplicate_skill,
+    find_conflicts,
+    new_custom_skill,
+)
 from tinyfix_lib import SENSITIVITY_NAMES
 
 AISTUDIO_KEY_URL = "https://aistudio.google.com/apikey"
@@ -51,6 +64,8 @@ class SettingsData:
     sensitivity: str = "cautious"
     llm: LLMConfig = field(default_factory=LLMConfig)
     last_update_check: str = ""
+    skills: list[Skill] = field(default_factory=default_skills)
+    skill_menu_hotkey: Hotkey = field(default_factory=lambda: parse_hotkey(DEFAULT_HOTKEY_MENU))
 
 
 @dataclass
@@ -58,6 +73,7 @@ class SettingsHooks:
     on_apply: Callable[[SettingsData], None]
     on_check_updates: Callable[[], None] | None = None
     on_live_sensitivity: Callable[[str], None] | None = None
+    on_test_skill: Callable[[Skill, str], str] | None = None
 
 
 _open_window: tk.Tk | None = None
@@ -120,8 +136,8 @@ class SettingsWindow:
         self._record_enabled: tk.BooleanVar | None = None
         self.root = tk.Tk()
         self.root.title("TinyFix Settings")
-        self.root.minsize(640, 520)
-        self.root.geometry("720x600+360+160")
+        self.root.minsize(720, 560)
+        self.root.geometry("760x640+340+120")
         try:
             self.root.attributes("-topmost", True)
             self.root.after(400, lambda: self.root.attributes("-topmost", False))
@@ -139,7 +155,12 @@ class SettingsWindow:
         self.notebook = ttk.Notebook(shell)
         self.notebook.grid(row=0, column=0, sticky="nsew")
 
+        self.skills = [Skill.from_dict(skill.to_dict()) for skill in (data.skills or default_skills())]
+        if not self.skills:
+            self.skills = default_skills()
+
         self._build_shortcuts()
+        self._build_skills()
         self._build_sensitivity()
         self._build_online()
         self._build_prompts()
@@ -190,17 +211,27 @@ class SettingsWindow:
             tab,
             3,
             "Translate",
-            "Replace the selection with a translation. Only runs when an online model is enabled.",
+            "Replace the selection with a translation. Only runs when an online model is enabled. You can also add more skills on the Skills tab.",
             self.tr_enabled,
             self.tr_key,
+        )
+        self.menu_enabled = tk.BooleanVar(value=not self.data.skill_menu_hotkey.is_disabled)
+        self.menu_key = tk.StringVar(value=_format_hotkey(self.data.skill_menu_hotkey))
+        self._shortcut_row(
+            tab,
+            4,
+            "Skill menu",
+            "Opens a small menu of enabled skills next to the caret or mouse cursor. Default: Ctrl+Alt+M.",
+            self.menu_enabled,
+            self.menu_key,
         )
         ttk.Checkbutton(
             tab,
             text="Translate: select the whole field first",
             variable=self.translate_select_all,
-        ).grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ).grid(row=5, column=0, sticky="w", pady=(8, 0))
         ttk.Label(tab, textvariable=self.record_status, foreground="#555555").grid(
-            row=5, column=0, sticky="w", pady=(12, 0)
+            row=6, column=0, sticky="w", pady=(12, 0)
         )
 
     def _shortcut_row(
@@ -431,10 +462,19 @@ class SettingsWindow:
             translate_prompt=self.data.llm.translate_prompt,
             target_language=self.data.llm.target_language or DEFAULT_TARGET_LANGUAGE,
         )
-        if include_prompts and hasattr(self, "fix_prompt"):
-            config.fix_prompt = self.fix_prompt.get("1.0", "end").rstrip("\n") + "\n"
-            config.translate_prompt = self.translate_prompt.get("1.0", "end").rstrip("\n") + "\n"
-            config.target_language = self.target_language.get().strip() or DEFAULT_TARGET_LANGUAGE
+        if include_prompts:
+            if hasattr(self, "fix_prompt"):
+                config.fix_prompt = self.fix_prompt.get("1.0", "end").rstrip("\n") + "\n"
+                config.translate_prompt = self.translate_prompt.get("1.0", "end").rstrip("\n") + "\n"
+            elif getattr(self, "skills", None):
+                self._flush_skill_editor()
+                by_id = {skill.id: skill for skill in self.skills}
+                if SKILL_FIX in by_id:
+                    config.fix_prompt = by_id[SKILL_FIX].prompt
+                if SKILL_TRANSLATE in by_id:
+                    config.translate_prompt = by_id[SKILL_TRANSLATE].prompt
+            if hasattr(self, "target_language"):
+                config.target_language = self.target_language.get().strip() or DEFAULT_TARGET_LANGUAGE
         return config
 
     def _refresh_models(self) -> None:
@@ -484,31 +524,23 @@ class SettingsWindow:
 
     def _build_prompts(self) -> None:
         tab = self._tab("Prompts")
-        tab.rowconfigure(1, weight=1)
-        tab.rowconfigure(4, weight=1)
         tab.columnconfigure(0, weight=1)
-        ttk.Label(tab, text="Use {{content}} for the selected text. If you omit it, the text is added at the end. Translate prompts may also use {{language}}.", wraplength=640).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
-        )
-        ttk.Label(tab, text="Correction prompt").grid(row=1, column=0, sticky="nw")
-        self.fix_prompt = tk.Text(tab, height=8, wrap="word", undo=True)
-        self.fix_prompt.grid(row=1, column=0, sticky="nsew", pady=(18, 0))
-        self.fix_prompt.insert("1.0", (self.data.llm.fix_prompt or DEFAULT_FIX_PROMPT).rstrip() + "\n")
-        ttk.Button(tab, text="Reset to default", command=lambda: self._reset_text(self.fix_prompt, DEFAULT_FIX_PROMPT)).grid(
-            row=2, column=0, sticky="e", pady=6
-        )
+        ttk.Label(
+            tab,
+            text="Each skill has its own prompt on the Skills tab. Use {{content}} for the selected text (if you omit it, the text is added at the end). Skills may also use {{language}}.",
+            wraplength=640,
+        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
         lang_row = ttk.Frame(tab)
-        lang_row.grid(row=3, column=0, sticky="ew", pady=(4, 4))
-        ttk.Label(lang_row, text="Target language").pack(side="left")
+        lang_row.grid(row=1, column=0, sticky="w")
+        ttk.Label(lang_row, text="Target language for {{language}}").pack(side="left")
         self.target_language = tk.StringVar(value=self.data.llm.target_language or DEFAULT_TARGET_LANGUAGE)
         ttk.Entry(lang_row, textvariable=self.target_language, width=24).pack(side="left", padx=(8, 0))
-        ttk.Label(tab, text="Translate prompt").grid(row=4, column=0, sticky="nw")
-        self.translate_prompt = tk.Text(tab, height=8, wrap="word", undo=True)
-        self.translate_prompt.grid(row=4, column=0, sticky="nsew", pady=(18, 0))
-        self.translate_prompt.insert("1.0", (self.data.llm.translate_prompt or DEFAULT_TRANSLATE_PROMPT).rstrip() + "\n")
-        ttk.Button(tab, text="Reset to default", command=lambda: self._reset_text(self.translate_prompt, DEFAULT_TRANSLATE_PROMPT)).grid(
-            row=5, column=0, sticky="e", pady=6
-        )
+        ttk.Label(
+            tab,
+            text="This language is substituted wherever a skill prompt contains {{language}}, including Translate.",
+            foreground="#555555",
+            wraplength=640,
+        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
     def _reset_text(self, widget: tk.Text, value: str) -> None:
         widget.delete("1.0", "end")
@@ -544,8 +576,279 @@ class SettingsWindow:
             row=4, column=0, sticky="w", pady=(16, 0)
         )
 
+    def _build_skills(self) -> None:
+        tab = self._tab("Skills")
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+
+        ttk.Label(
+            tab,
+            text="Create as many skills as you like. Each one can have its own shortcut, prompt, and input mode. Fix and Translate are built in (Fix can still fall back to the offline engine).",
+            wraplength=680,
+        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        body = ttk.Frame(tab)
+        body.grid(row=1, column=0, sticky="nsew")
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(body)
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
+        left.rowconfigure(0, weight=1)
+        self.skill_list = tk.Listbox(left, height=14, exportselection=False, width=28)
+        self.skill_list.grid(row=0, column=0, sticky="nsw")
+        self.skill_list.bind("<<ListboxSelect>>", self._on_skill_select)
+        buttons = ttk.Frame(left)
+        buttons.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(buttons, text="Add", command=self._add_skill).pack(fill="x")
+        ttk.Button(buttons, text="Duplicate", command=self._duplicate_skill).pack(fill="x", pady=(4, 0))
+        ttk.Button(buttons, text="Delete", command=self._delete_skill).pack(fill="x", pady=(4, 0))
+        ttk.Button(buttons, text="Move up", command=lambda: self._move_skill(-1)).pack(fill="x", pady=(4, 0))
+        ttk.Button(buttons, text="Move down", command=lambda: self._move_skill(1)).pack(fill="x", pady=(4, 0))
+
+        editor = ttk.LabelFrame(body, text="Skill", padding=10)
+        editor.grid(row=0, column=1, sticky="nsew")
+        editor.columnconfigure(1, weight=1)
+        editor.rowconfigure(5, weight=1)
+
+        self.skill_name = tk.StringVar()
+        self.skill_enabled = tk.BooleanVar(value=True)
+        self.skill_mode = tk.StringVar(value=INPUT_SELECTION)
+        self.skill_hotkey = tk.StringVar(value=DISABLED_LABEL)
+        self.skill_hotkey_enabled = tk.BooleanVar(value=False)
+        self.skill_status = tk.StringVar(value="")
+
+        ttk.Label(editor, text="Name").grid(row=0, column=0, sticky="w")
+        ttk.Entry(editor, textvariable=self.skill_name).grid(row=0, column=1, sticky="ew", padx=8)
+        ttk.Checkbutton(editor, text="Enabled", variable=self.skill_enabled).grid(row=0, column=2, sticky="w")
+
+        ttk.Label(editor, text="Input").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        modes = ttk.Frame(editor)
+        modes.grid(row=1, column=1, columnspan=2, sticky="w", padx=8, pady=(8, 0))
+        ttk.Radiobutton(modes, text="Use the current selection", value=INPUT_SELECTION, variable=self.skill_mode).pack(side="left")
+        ttk.Radiobutton(modes, text="Select the whole field first", value=INPUT_SELECT_ALL, variable=self.skill_mode).pack(side="left", padx=(12, 0))
+
+        ttk.Label(editor, text="Shortcut").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        hot = ttk.Frame(editor)
+        hot.grid(row=2, column=1, columnspan=2, sticky="ew", padx=8, pady=(8, 0))
+        ttk.Entry(hot, textvariable=self.skill_hotkey, state="readonly", width=28).pack(side="left", fill="x", expand=True)
+        ttk.Button(hot, text="Record", command=lambda: self._start_record(self.skill_hotkey, self.skill_hotkey_enabled)).pack(side="left", padx=(8, 0))
+        ttk.Button(hot, text="Disable", command=lambda: self._disable_row(self.skill_hotkey, self.skill_hotkey_enabled)).pack(side="left", padx=(8, 0))
+
+        ttk.Label(editor, text="Prompt  (use {{content}} and optionally {{language}})").grid(row=3, column=0, columnspan=3, sticky="w", pady=(12, 4))
+        self.skill_prompt = tk.Text(editor, height=10, wrap="word", undo=True)
+        self.skill_prompt.grid(row=5, column=0, columnspan=3, sticky="nsew")
+
+        actions = ttk.Frame(editor)
+        actions.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        ttk.Button(actions, text="Reset prompt to default", command=self._reset_skill_prompt).pack(side="left")
+        ttk.Button(actions, text="Test on sample text", command=self._test_skill).pack(side="left", padx=(8, 0))
+        ttk.Label(editor, textvariable=self.skill_status, foreground="#555555", wraplength=420).grid(
+            row=7, column=0, columnspan=3, sticky="w", pady=(8, 0)
+        )
+
+        self._selected_skill_index = 0
+        self._skill_loading = False
+        self._refresh_skill_list(select=0)
+
+    def _skill_label(self, skill: Skill) -> str:
+        mark = "" if skill.enabled else " (off)"
+        builtin = " •" if skill.builtin else ""
+        return f"{skill.name}{builtin}{mark}"
+
+    def _refresh_skill_list(self, select: int | None = None) -> None:
+        if select is None:
+            select = self._selected_skill_index
+        self.skill_list.delete(0, "end")
+        for skill in self.skills:
+            self.skill_list.insert("end", self._skill_label(skill))
+        if not self.skills:
+            return
+        select = max(0, min(int(select), len(self.skills) - 1))
+        self.skill_list.selection_clear(0, "end")
+        self.skill_list.selection_set(select)
+        self.skill_list.activate(select)
+        self.skill_list.see(select)
+        self._selected_skill_index = select
+        self._load_skill_editor(select)
+
+    def _flush_skill_editor(self) -> None:
+        if not getattr(self, "skills", None) or getattr(self, "_skill_loading", False):
+            return
+        index = getattr(self, "_selected_skill_index", 0)
+        if index < 0 or index >= len(self.skills):
+            return
+        skill = self.skills[index]
+        skill.name = (self.skill_name.get() or "").strip() or skill.name or "New skill"
+        skill.enabled = bool(self.skill_enabled.get())
+        skill.input_mode = self.skill_mode.get() or INPUT_SELECTION
+        skill.hotkey = "none" if not self.skill_hotkey_enabled.get() else (
+            "none" if self.skill_hotkey.get() in (DISABLED_LABEL, "", "None") else self.skill_hotkey.get()
+        )
+        skill.prompt = self.skill_prompt.get("1.0", "end").rstrip("\n") + "\n"
+        if skill.id in (SKILL_FIX, SKILL_FIX_ALL):
+            skill.offline_fallback = True
+
+    def _load_skill_editor(self, index: int) -> None:
+        if index < 0 or index >= len(self.skills):
+            return
+        self._skill_loading = True
+        skill = self.skills[index]
+        self._selected_skill_index = index
+        self.skill_name.set(skill.name)
+        self.skill_enabled.set(bool(skill.enabled))
+        self.skill_mode.set(skill.input_mode)
+        hotkey = skill.hotkey_obj()
+        self.skill_hotkey_enabled.set(not hotkey.is_disabled)
+        self.skill_hotkey.set(_format_hotkey(hotkey))
+        self.skill_prompt.delete("1.0", "end")
+        self.skill_prompt.insert("1.0", (skill.prompt or "").rstrip() + "\n")
+        if skill.builtin:
+            self.skill_status.set("Built-in skill. You can edit it or turn it off, but you cannot delete it.")
+        elif skill.needs_ai:
+            self.skill_status.set("This skill needs an online model. It stays inactive until one is enabled.")
+        else:
+            self.skill_status.set("")
+        self._skill_loading = False
+
+    def _on_skill_select(self, _event=None) -> None:
+        selection = self.skill_list.curselection()
+        if not selection:
+            return
+        index = int(selection[0])
+        if index == self._selected_skill_index:
+            return
+        self._flush_skill_editor()
+        self._refresh_skill_list(select=index)
+
+    def _add_skill(self) -> None:
+        self._flush_skill_editor()
+        self.skills.append(new_custom_skill())
+        self._refresh_skill_list(select=len(self.skills) - 1)
+        self.skill_status.set("New skill added. Give it a name, a prompt, and optionally a shortcut.")
+
+    def _duplicate_skill(self) -> None:
+        self._flush_skill_editor()
+        index = self._selected_skill_index
+        if index < 0 or index >= len(self.skills):
+            return
+        self.skills.insert(index + 1, duplicate_skill(self.skills[index]))
+        self._refresh_skill_list(select=index + 1)
+
+    def _delete_skill(self) -> None:
+        self._flush_skill_editor()
+        index = self._selected_skill_index
+        if index < 0 or index >= len(self.skills):
+            return
+        skill = self.skills[index]
+        if skill.builtin:
+            self.skill_status.set("Built-in skills cannot be deleted. You can disable them or duplicate them.")
+            return
+        del self.skills[index]
+        self._refresh_skill_list(select=min(index, len(self.skills) - 1))
+
+    def _move_skill(self, delta: int) -> None:
+        self._flush_skill_editor()
+        index = self._selected_skill_index
+        target = index + delta
+        if index < 0 or target < 0 or target >= len(self.skills):
+            return
+        self.skills[index], self.skills[target] = self.skills[target], self.skills[index]
+        self._refresh_skill_list(select=target)
+
+    def _reset_skill_prompt(self) -> None:
+        index = self._selected_skill_index
+        if index < 0 or index >= len(self.skills):
+            return
+        skill = self.skills[index]
+        if skill.id == SKILL_TRANSLATE:
+            value = DEFAULT_TRANSLATE_PROMPT
+        elif skill.id in (SKILL_FIX, SKILL_FIX_ALL):
+            value = DEFAULT_FIX_PROMPT
+        else:
+            from skills import DEFAULT_CUSTOM_PROMPT
+            value = DEFAULT_CUSTOM_PROMPT
+        self.skill_prompt.delete("1.0", "end")
+        self.skill_prompt.insert("1.0", value.rstrip() + "\n")
+
+    def _test_skill(self) -> None:
+        self._flush_skill_editor()
+        index = self._selected_skill_index
+        if index < 0 or index >= len(self.skills):
+            return
+        skill = Skill.from_dict(self.skills[index].to_dict())
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Test “{skill.name}”")
+        dialog.geometry("520x420+400+200")
+        dialog.transient(self.root)
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
+        dialog.rowconfigure(3, weight=1)
+        ttk.Label(dialog, text="Sample text").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
+        sample = tk.Text(dialog, height=6, wrap="word")
+        sample.grid(row=1, column=0, sticky="nsew", padx=12)
+        sample.insert("1.0", "Hi frinds how are you?")
+        ttk.Label(dialog, text="Result").grid(row=2, column=0, sticky="w", padx=12, pady=(8, 4))
+        result = tk.Text(dialog, height=8, wrap="word")
+        result.grid(row=3, column=0, sticky="nsew", padx=12)
+        status = tk.StringVar(value="")
+        ttk.Label(dialog, textvariable=status, wraplength=480, foreground="#555555").grid(row=4, column=0, sticky="w", padx=12, pady=8)
+        row = ttk.Frame(dialog)
+        row.grid(row=5, column=0, sticky="e", padx=12, pady=(0, 12))
+
+        def run_test() -> None:
+            text = sample.get("1.0", "end").rstrip("\n")
+            status.set("Running…")
+            result.delete("1.0", "end")
+            hook = self.hooks.on_test_skill
+
+            def work() -> None:
+                error = ""
+                output = ""
+                try:
+                    if hook is None:
+                        raise RuntimeError("Testing is not available in this window.")
+                    output = hook(skill, text) or ""
+                except Exception as exc:
+                    error = str(exc)
+                def done() -> None:
+                    if error:
+                        status.set(error)
+                        return
+                    result.insert("1.0", output)
+                    status.set("Done.")
+                dialog.after(0, done)
+
+            threading.Thread(target=work, name="tinyfix-skill-test", daemon=True).start()
+
+        ttk.Button(row, text="Run test", command=run_test).pack(side="right", padx=(8, 0))
+        ttk.Button(row, text="Close", command=dialog.destroy).pack(side="right")
+        dialog.focus_force()
+
     def _collect(self) -> SettingsData:
+        self._flush_skill_editor()
         llm = self._current_llm(include_prompts=True)
+        skills = [Skill.from_dict(skill.to_dict()) for skill in self.skills]
+        by_id = {skill.id: skill for skill in skills}
+        if SKILL_FIX in by_id:
+            by_id[SKILL_FIX].hotkey = (
+                "none" if not self.sel_enabled.get() else (self.sel_key.get() or DEFAULT_HOTKEY)
+            )
+        if SKILL_FIX_ALL in by_id:
+            by_id[SKILL_FIX_ALL].hotkey = (
+                "none" if not self.all_enabled.get() else (self.all_key.get() or DEFAULT_HOTKEY_ALL)
+            )
+        if SKILL_TRANSLATE in by_id:
+            by_id[SKILL_TRANSLATE].hotkey = (
+                "none" if not self.tr_enabled.get() else (self.tr_key.get() or DEFAULT_HOTKEY_TRANSLATE)
+            )
+            by_id[SKILL_TRANSLATE].input_mode = (
+                INPUT_SELECT_ALL if self.translate_select_all.get() else INPUT_SELECTION
+            )
+            by_id[SKILL_TRANSLATE].prompt = llm.translate_prompt or by_id[SKILL_TRANSLATE].prompt
+        if SKILL_FIX in by_id:
+            by_id[SKILL_FIX].prompt = llm.fix_prompt or by_id[SKILL_FIX].prompt
+        menu = _hotkey_from_row(self.menu_enabled.get(), self.menu_key.get(), DEFAULT_HOTKEY_MENU)
         return SettingsData(
             version=self.data.version,
             hotkey=_hotkey_from_row(self.sel_enabled.get(), self.sel_key.get(), DEFAULT_HOTKEY),
@@ -555,16 +858,27 @@ class SettingsWindow:
             sensitivity=self.sensitivity.get(),
             llm=llm,
             last_update_check=self.data.last_update_check,
+            skills=skills,
+            skill_menu_hotkey=menu,
         )
 
     def _apply(self) -> bool:
         data = self._collect()
-        if not data.hotkey.is_disabled and not data.hotkey_all.is_disabled and data.hotkey.display == data.hotkey_all.display:
-            self.record_status.set("Please choose different shortcuts for Fix selection and Fix all.")
-            self.notebook.select(0)
+        conflicts = find_conflicts(data.skills, data.skill_menu_hotkey)
+        if conflicts:
+            message = "Shortcut conflict: " + "; ".join(item.describe() for item in conflicts[:3])
+            if hasattr(self, "skill_status"):
+                self.skill_status.set(message)
+            self.record_status.set(message)
+            # Skills tab is index 1
+            try:
+                self.notebook.select(1)
+            except tk.TclError:
+                self.notebook.select(0)
             return False
         self.hooks.on_apply(data)
         self.data = data
+        self.skills = [Skill.from_dict(skill.to_dict()) for skill in data.skills]
         return True
 
     def _ok(self) -> None:

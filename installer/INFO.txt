@@ -13,6 +13,9 @@ affiliated with the model author.
 An optional online model (Google Gemini or any OpenAI-compatible API)
 can be turned on later in Settings. It is off by default.
 
+Ctrl+Alt+M opens a skill menu next to the cursor. You can add your
+own skills (for example Make formal email, or Summarize) in Settings.
+
 Limitations
 - The built-in engine is English only. Other languages, including
   Persian, are left unchanged unless you enable online translation.

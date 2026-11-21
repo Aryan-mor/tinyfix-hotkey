@@ -15,8 +15,9 @@ No administrator account is required. The setup is per-user and includes the Pyt
 
 ## Use
 
-- Select English text in Chrome, Notepad, Word, or any other app, then press **Ctrl+Alt+Space** (or the Fix selection shortcut you chose).
+- Select English text in Chrome, Notepad, Word, or any other app, then press **Ctrl+Alt+Space** (or the Fix shortcut you chose).
 - To correct the whole field, press **Ctrl+F3** (or your Fix all shortcut). TinyFix selects all, copies, corrects, and pastes back.
+- Press **Ctrl+Alt+M** (or your Skill menu shortcut) to open a small menu of enabled skills next to the caret or mouse cursor. Press 1–9 to run a skill, or Esc to cancel. TinyFix restores the original window before it sends keys.
 - Left-click the tray icon to correct whatever text is currently on the clipboard. The corrected text stays on the clipboard; a short notification tells you how many changes were made, or that nothing needed fixing.
 - Right-click the tray icon for **Settings…**, pause, sensitivity, updates, or exit.
 - If nothing is selected (or the copy fails), TinyFix tells you. If the text was already fine, it says **No typos found**.
@@ -24,17 +25,36 @@ No administrator account is required. The setup is per-user and includes the Pyt
 
 ## Settings
 
-Open **Settings…** from the tray for a single window with Shortcuts, Sensitivity, Online AI, Prompts, Updates, and About.
+Open **Settings…** from the tray for a single window with Shortcuts, Skills, Sensitivity, Online AI, Prompts, Updates, and About.
 
 ### Shortcuts
 
-Each of the three shortcuts can be recorded, changed, or set to **None/Disabled**:
+Each built-in shortcut can be recorded, changed, or set to **None/Disabled**:
 
 | Action | Default | Notes |
 | --- | --- | --- |
-| Fix selection | **Ctrl+Alt+Space** | Corrects the highlighted text. |
-| Fix all | **Ctrl+F3** | Selects the whole field first. |
+| Fix | **Ctrl+Alt+Space** | Corrects the highlighted text. Falls back to the built-in offline engine if an online model is off, times out, or fails. |
+| Fix all | **Ctrl+F3** | Same as Fix, but selects the whole field first. |
 | Translate | **Ctrl+Alt+T** | Only active when an online model is enabled. **T** is for translate; Ctrl+T and Ctrl+Shift+T are already used by browsers, but Ctrl+Alt+T is rarely bound on Windows. |
+| Skill menu | **Ctrl+Alt+M** | Pops up a list of enabled skills near the caret or cursor. **M** is for menu; the combo is rarely used on Windows. Can be disabled. |
+
+### Skills
+
+**Settings → Skills** lets you add as many skills as you want. Each skill has a name, an input mode (current selection, or select the whole field first), a prompt template, an optional shortcut, and an on/off switch. You can add, edit, duplicate, delete, and reorder them. Built-in **Fix**, **Fix all**, and **Translate** can be edited or turned off, but not deleted.
+
+Skill prompts use `{{content}}` for the selected text (if you omit it, the text is appended). They may also use `{{language}}`, which comes from the target language on the Prompts tab. A **Test on sample text** button runs the skill on a sample without changing the current window.
+
+Skills that need an online model (everything except Fix and Fix all) are only active when an online model is configured and enabled. The skill menu still lists them and shows a hint if AI is off. Custom skills do not fall back to the offline engine: if the request times out or fails, TinyFix shows a short notification and leaves the text unchanged. While it waits, a tray toast says **Running {skill}…**.
+
+If two skills (or a skill and the skill menu) share the same shortcut, Settings asks you to change one of them.
+
+Examples you can add yourself:
+
+| Skill | What it does |
+| --- | --- |
+| **Make formal email** | Rewrites the selection as a clear, polite formal email. Prompt idea: `Rewrite the text below as a clear, polite formal email. Keep the meaning and return only the email body.` plus `{{content}}`. |
+| **Summarize** | Replaces the selection with a short summary. Prompt idea: `Summarize the text below in a few short sentences. Return only the summary.` plus `{{content}}`. |
+| **Translate to German** | Translates the selection into German (or duplicate the built-in Translate skill and set `{{language}}` / the wording to German). |
 
 ### Sensitivity
 
@@ -57,7 +77,7 @@ API keys are stored with Windows DPAPI (`CryptProtectData`) in `secrets.dpapi` n
 
 ### Prompts
 
-Settings includes an editable **correction prompt** and **translate prompt**. `{{content}}` is replaced with the selected text; if you omit it, the text is appended. The translate prompt also has `{{language}}` (default target language: English). **Reset to default** restores the built-in wording. TinyFix strips wrapping code fences or quotes a model might add.
+Each skill has its own editable prompt on the Skills tab (`{{content}}`, and optionally `{{language}}`). The Prompts tab holds the default target language (English). **Reset prompt to default** on a built-in skill restores its original wording. TinyFix strips wrapping code fences or quotes a model might add.
 
 **Translate** (Ctrl+Alt+T) is selection-based, with an optional “select the whole field first” checkbox in Settings. It only runs when an online model is configured and enabled. If translation fails, the original text is left unchanged.
 
@@ -72,6 +92,8 @@ hotkey_all=Ctrl+F3
 hotkey_translate=Ctrl+Alt+T
 sensitivity=cautious
 ```
+
+User-defined skills (and the Skill menu shortcut) are stored in `skills.json` in the same folder. This file is not encrypted; do not put API keys in a prompt. Upgrades from 1.2.x create `skills.json` from your existing shortcuts and prompts on first launch.
 
 Set a shortcut to `none` to disable it. Both fix shortcuts can be disabled at once; left-clicking the tray icon still fixes the clipboard.
 

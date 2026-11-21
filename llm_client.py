@@ -281,3 +281,15 @@ def correct_with_fallback(text: str, engine, config: LLMConfig | None) -> tuple[
     if engine is None:
         return text, "offline"
     return engine.fix(text), "offline"
+
+
+def run_skill_online(config: LLMConfig, template: str, text: str, language: str | None = None) -> str:
+    """Run a skill prompt online. No offline fallback."""
+    if config is None or not config.ready:
+        raise LLMError("Turn on an online model in Settings to use this skill")
+    prompt = render_prompt(template or "", text, language=language)
+    result = complete(config, prompt, timeout=config.timeout)
+    cleaned = strip_model_output(result)
+    if not cleaned:
+        raise LLMError("The model returned empty text")
+    return cleaned

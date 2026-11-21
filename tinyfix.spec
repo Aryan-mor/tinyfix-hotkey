@@ -22,6 +22,8 @@ hiddenimports = [
     "secret_store",
     "llm_client",
     "settings_ui",
+    "skills",
+    "skill_menu",
     "sv_ttk",
 ]
 

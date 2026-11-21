@@ -5,6 +5,7 @@ import pytest
 from hotkey_util import (
     DEFAULT_HOTKEY,
     DEFAULT_HOTKEY_ALL,
+    DEFAULT_HOTKEY_MENU,
     DEFAULT_HOTKEY_TRANSLATE,
     MOD_ALT,
     MOD_CONTROL,
@@ -85,3 +86,9 @@ def test_default_translate_hotkey_is_ctrl_alt_t():
     assert hotkey.modifiers & MOD_CONTROL
     assert hotkey.modifiers & MOD_ALT
     assert hotkey.is_safe()
+
+
+def test_default_skill_menu_hotkey_is_ctrl_alt_m():
+    hotkey = parse_hotkey(DEFAULT_HOTKEY_MENU)
+    assert hotkey.display == "Ctrl+Alt+M"
+    assert not hotkey.is_disabled

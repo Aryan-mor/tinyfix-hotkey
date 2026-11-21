@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -67,6 +67,7 @@ Type: files; Name: "{app}\config.ini"
 Type: files; Name: "{app}\secrets.dpapi"
 Type: files; Name: "{app}\prompt_fix.txt"
 Type: files; Name: "{app}\prompt_translate.txt"
+Type: files; Name: "{app}\skills.json"
 
 [Code]
 const

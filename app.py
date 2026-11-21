@@ -18,16 +18,27 @@ from pathlib import Path
 from hotkey_util import (
     DEFAULT_HOTKEY,
     DEFAULT_HOTKEY_ALL,
+    DEFAULT_HOTKEY_MENU,
     DEFAULT_HOTKEY_TRANSLATE,
     KEY_CHOICES,
     Hotkey,
     disabled_hotkey,
     parse_hotkey,
 )
-from llm_client import LLMConfig, LLMError, LLMTimeout, correct_with_fallback, translate_online
+from llm_client import LLMConfig, LLMError, LLMTimeout, correct_with_fallback, run_skill_online, translate_online
 from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
 from secret_store import default_secrets_path, load_api_key, save_api_key
 from settings_ui import SettingsData, SettingsHooks, open_settings
+from skill_menu import get_foreground_hwnd, restore_foreground, show_skill_menu
+from skills import (
+    Skill,
+    SkillStore,
+    default_store,
+    legacy_from_store,
+    load_skill_store,
+    save_skill_store,
+    visible_menu_skills,
+)
 from tinyfix_lib import DEFAULT_SENSITIVITY, SENSITIVITY_NAMES, normalize_sensitivity, plan_clipboard_fix
 from update_check import (
     LatestRelease,
@@ -42,12 +53,14 @@ from update_check import (
 )
 
 APP_NAME = "TinyFix"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 MUTEX_NAME = "Local\\TinyFixHotkey"
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
 HOTKEY_ALL_ID = 2
 HOTKEY_TRANSLATE_ID = 3
+HOTKEY_MENU_ID = 4
+HOTKEY_SKILL_BASE = 100
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
 WM_APP_RELOAD = 0x8001
@@ -112,6 +125,7 @@ os.environ.setdefault("PYTHONPYCACHEPREFIX", str(ROOT / "cache" / "pycache"))
 LOG_PATH = ROOT / "tinyfix.log"
 PID_PATH = ROOT / "tinyfix.pid"
 CONFIG_PATH = ROOT / "config.ini"
+SKILLS_PATH = ROOT / "skills.json"
 SECRETS_PATH = default_secrets_path(ROOT)
 PROMPT_FIX_PATH = ROOT / "prompt_fix.txt"
 PROMPT_TRANSLATE_PATH = ROOT / "prompt_translate.txt"
@@ -249,6 +263,9 @@ hotkey_failed = threading.Event()
 current_hotkey = parse_hotkey(DEFAULT_HOTKEY)
 current_hotkey_all = parse_hotkey(DEFAULT_HOTKEY_ALL)
 current_hotkey_translate = parse_hotkey(DEFAULT_HOTKEY_TRANSLATE)
+current_hotkey_menu = parse_hotkey(DEFAULT_HOTKEY_MENU)
+skill_store: SkillStore = default_store()
+skill_hotkey_ids: dict[int, str] = {}
 translate_select_all = False
 current_sensitivity = DEFAULT_SENSITIVITY
 llm_config = LLMConfig()
@@ -390,13 +407,54 @@ def load_settings() -> None:
         llm_config.api_key = load_api_key(SECRETS_PATH)
         llm_config.fix_prompt = _read_prompt_file(PROMPT_FIX_PATH, DEFAULT_FIX_PROMPT)
         llm_config.translate_prompt = _read_prompt_file(PROMPT_TRANSLATE_PATH, DEFAULT_TRANSLATE_PROMPT)
+    _load_skill_store_from_disk()
+
+
+def _load_skill_store_from_disk() -> None:
+    global skill_store, current_hotkey_menu
+    store, created = load_skill_store(
+        SKILLS_PATH,
+        fix_hotkey=current_hotkey,
+        fix_all_hotkey=current_hotkey_all,
+        translate_hotkey=current_hotkey_translate,
+        translate_select_all=translate_select_all,
+        fix_prompt=llm_config.fix_prompt or DEFAULT_FIX_PROMPT,
+        translate_prompt=llm_config.translate_prompt or DEFAULT_TRANSLATE_PROMPT,
+    )
+    skill_store = store
+    current_hotkey_menu = store.menu_hotkey()
+    _sync_legacy_from_skills()
+    if created:
+        try:
+            save_skill_store(SKILLS_PATH, skill_store)
+        except Exception:
+            logging.exception("Could not write skills.json")
+
+
+def _sync_legacy_from_skills() -> None:
+    global current_hotkey, current_hotkey_all, current_hotkey_translate, translate_select_all, llm_config
+    mapped = legacy_from_store(skill_store)
+    current_hotkey = mapped["hotkey"]
+    current_hotkey_all = mapped["hotkey_all"]
+    current_hotkey_translate = mapped["hotkey_translate"]
+    translate_select_all = mapped["translate_select_all"]
+    llm_config.fix_prompt = mapped["fix_prompt"]
+    llm_config.translate_prompt = mapped["translate_prompt"]
 
 
 def save_settings(
     persist_hotkeys: bool = True,
     persist_sensitivity: bool = True,
     persist_llm: bool = False,
+    persist_skills: bool = True,
 ) -> None:
+    if persist_skills:
+        skill_store.skill_menu_hotkey = "none" if current_hotkey_menu.is_disabled else current_hotkey_menu.display
+        try:
+            save_skill_store(SKILLS_PATH, skill_store)
+        except Exception:
+            logging.exception("Could not save skills.json")
+        _sync_legacy_from_skills()
     parser = _load_parser()
     if persist_hotkeys:
         parser[CONFIG_SECTION]["hotkey"] = config_hotkey_value(current_hotkey)
@@ -634,7 +692,138 @@ def copy_selection(select_all: bool = False) -> tuple[str | None, dict[int, byte
     return selected, saved, "ok"
 
 
+def run_skill(skill: Skill, target_hwnd: int | None = None) -> None:
+    source = skill.name
+    if paused.is_set():
+        logging.info("Skill ignored: paused (%s)", source)
+        return
+    if skill.needs_ai and (not llm_config or not llm_config.ready):
+        logging.info("Skill ignored: online model is not enabled (%s)", source)
+        notify("TinyFix", "Turn on an online model in Settings to use this skill")
+        return
+    if skill.offline_fallback and engine is None and not (llm_config and llm_config.ready):
+        logging.info("Skill ignored: engine not ready (%s)", source)
+        return
+    if not busy.acquire(blocking=False):
+        logging.info("Skill ignored: busy (%s)", source)
+        return
+    try:
+        if target_hwnd:
+            restore_foreground(target_hwnd)
+            time.sleep(0.05)
+        if foreground_is_unequally_elevated():
+            logging.info("Skill ignored: target window is elevated (%s)", source)
+            notify("TinyFix", "Can't reach an elevated window")
+            return
+        selected, saved, reason = copy_selection(select_all=skill.select_all)
+        if reason != "ok":
+            length = 0 if selected is None else len(selected)
+            logging.info("Skill early return: %s (length=%s, %s)", reason, length, source)
+            if reason in ("copy_failed", "empty_selection"):
+                notify("TinyFix", "Nothing selected / could not copy the selection")
+            elif reason == "clipboard_snapshot_failed":
+                notify("TinyFix", "Could not read the clipboard")
+            return
+        notify("TinyFix", f"Running {skill.name}…")
+        try:
+            if skill.offline_fallback:
+                result, origin = correct_with_fallback(selected, engine, llm_config)
+            else:
+                result = run_skill_online(
+                    llm_config,
+                    skill.prompt,
+                    selected,
+                    language=llm_config.target_language,
+                )
+                origin = "online"
+        except LLMTimeout:
+            logging.info("Skill timed out; leaving the text unchanged (%s)", source)
+            restore_clipboard(saved)
+            notify("TinyFix", f"{skill.name} timed out; the text was left unchanged")
+            return
+        except LLMError as exc:
+            logging.info("Skill failed; leaving the text unchanged (%s): %s", source, exc)
+            restore_clipboard(saved)
+            notify("TinyFix", f"{skill.name} failed; the text was left unchanged")
+            return
+        except Exception:
+            logging.exception("Skill failed (%s)", source)
+            restore_clipboard(saved)
+            notify("TinyFix", f"{skill.name} failed; the text was left unchanged")
+            return
+        if not result:
+            restore_clipboard(saved)
+            logging.info("Skill early return: empty result (length=%s, %s)", len(selected), source)
+            notify("TinyFix", f"{skill.name} failed; the text was left unchanged")
+            return
+        if result == selected:
+            restore_clipboard(saved)
+            logging.info("Skill early return: unchanged (length=%s, %s)", len(selected), source)
+            if skill.offline_fallback:
+                notify("TinyFix", "No typos found")
+            else:
+                notify("TinyFix", f"{skill.name}: no changes")
+            return
+        if target_hwnd:
+            restore_foreground(target_hwnd)
+            time.sleep(0.02)
+        if not write_unicode_text(result):
+            restore_clipboard(saved)
+            logging.info("Skill early return: clipboard write failed (length=%s, %s)", len(selected), source)
+            return
+        send_ctrl_key(VK_V)
+        time.sleep(0.12)
+        restore_clipboard(saved)
+        logging.info("Skill %s changed %s character(s) (%s)", source, len(selected), origin)
+    finally:
+        busy.release()
+
+
+def test_skill_text(skill: Skill, sample: str) -> str:
+    if skill.offline_fallback:
+        result, _origin = correct_with_fallback(sample, engine, llm_config)
+        return result
+    return run_skill_online(
+        llm_config,
+        skill.prompt,
+        sample,
+        language=llm_config.target_language,
+    )
+
+
+def on_skill_menu_hotkey() -> None:
+    if paused.is_set():
+        logging.info("Skill menu ignored: paused")
+        return
+    hwnd = get_foreground_hwnd()
+    items = visible_menu_skills(skill_store)
+    if not items:
+        notify("TinyFix", "No enabled skills")
+        return
+    hint = None
+    if not (llm_config and llm_config.ready) and any(item.needs_ai for item in items):
+        hint = "Turn on an online model in Settings to use AI skills"
+    choice = show_skill_menu(
+        items,
+        ai_ready=bool(llm_config and llm_config.ready),
+        target_hwnd=hwnd,
+        hint=hint,
+    )
+    if choice.cancelled or choice.skill is None:
+        restore_foreground(hwnd)
+        logging.info("Skill menu cancelled")
+        return
+    run_skill(choice.skill, target_hwnd=choice.target_hwnd)
+
+
 def on_hotkey(select_all: bool = False) -> None:
+    skill_id = "fix-all" if select_all else "fix"
+    skill = skill_store.get(skill_id)
+    if skill is None:
+        logging.info("Hotkey ignored: missing skill %s", skill_id)
+        return
+    run_skill(skill)
+    return
     source = "fix-all" if select_all else "fix-selection"
     if paused.is_set():
         logging.info("Hotkey ignored: paused (%s)", source)
@@ -684,6 +873,12 @@ def on_hotkey(select_all: bool = False) -> None:
 
 
 def on_translate_hotkey() -> None:
+    skill = skill_store.get("translate")
+    if skill is None:
+        logging.info("Hotkey ignored: missing translate skill")
+        return
+    run_skill(skill)
+    return
     source = "translate"
     if paused.is_set():
         logging.info("Hotkey ignored: paused (%s)", source)
@@ -762,25 +957,40 @@ def _register_one(hotkey: Hotkey, hotkey_id: int, label: str) -> bool:
 
 def register_current_hotkeys() -> bool:
     failed_hotkey_ids.clear()
-    ok_sel = _register_one(current_hotkey, HOTKEY_ID, "Fix-selection")
-    ok_all = _register_one(current_hotkey_all, HOTKEY_ALL_ID, "Fix-all")
-    if llm_config.ready and not current_hotkey_translate.is_disabled:
-        ok_tr = _register_one(current_hotkey_translate, HOTKEY_TRANSLATE_ID, "Translate")
-    else:
-        user32.UnregisterHotKey(None, HOTKEY_TRANSLATE_ID)
-        failed_hotkey_ids.discard(HOTKEY_TRANSLATE_ID)
-        if current_hotkey_translate.is_disabled:
-            logging.info("Translate shortcut is disabled")
-        else:
-            logging.info("Translate shortcut is idle until an online model is enabled")
-        ok_tr = True
-    return ok_sel and ok_all and ok_tr
+    skill_hotkey_ids.clear()
+    ok = _register_one(current_hotkey_menu, HOTKEY_MENU_ID, "Skill menu")
+    for index, skill in enumerate(skill_store.skills):
+        hotkey_id = HOTKEY_SKILL_BASE + index
+        skill_hotkey_ids[hotkey_id] = skill.id
+        user32.UnregisterHotKey(None, hotkey_id)
+        if not skill.enabled:
+            failed_hotkey_ids.discard(hotkey_id)
+            continue
+        hotkey = skill.hotkey_obj()
+        if skill.needs_ai and not llm_config.ready:
+            failed_hotkey_ids.discard(hotkey_id)
+            if hotkey.is_disabled:
+                logging.info("%s shortcut is disabled", skill.name)
+            else:
+                logging.info("%s shortcut is idle until an online model is enabled", skill.name)
+            continue
+        if not _register_one(hotkey, hotkey_id, skill.name):
+            ok = False
+    # Drop leftover ids if the user deleted skills since the last register.
+    for leftover in range(HOTKEY_SKILL_BASE + len(skill_store.skills), HOTKEY_SKILL_BASE + 64):
+        user32.UnregisterHotKey(None, leftover)
+    return ok
 
 
 def unregister_current_hotkeys() -> None:
+    user32.UnregisterHotKey(None, HOTKEY_MENU_ID)
     user32.UnregisterHotKey(None, HOTKEY_ID)
     user32.UnregisterHotKey(None, HOTKEY_ALL_ID)
     user32.UnregisterHotKey(None, HOTKEY_TRANSLATE_ID)
+    for hotkey_id in list(skill_hotkey_ids):
+        user32.UnregisterHotKey(None, hotkey_id)
+    for leftover in range(HOTKEY_SKILL_BASE, HOTKEY_SKILL_BASE + 64):
+        user32.UnregisterHotKey(None, leftover)
 
 
 def post_to_hotkey_thread(message: int) -> None:
@@ -826,7 +1036,15 @@ def hotkey_loop() -> None:
         if msg.message == WM_HOTKEY:
             logging.info("WM_HOTKEY received (id=%s)", int(msg.wParam))
             try:
-                if msg.wParam == HOTKEY_ID:
+                if msg.wParam == HOTKEY_MENU_ID:
+                    on_skill_menu_hotkey()
+                elif int(msg.wParam) in skill_hotkey_ids:
+                    skill = skill_store.get(skill_hotkey_ids[int(msg.wParam)])
+                    if skill is None:
+                        logging.info("Hotkey ignored: missing skill for id %s", int(msg.wParam))
+                    else:
+                        run_skill(skill)
+                elif msg.wParam == HOTKEY_ID:
                     on_hotkey(select_all=False)
                 elif msg.wParam == HOTKEY_ALL_ID:
                     on_hotkey(select_all=True)
@@ -888,6 +1106,12 @@ def _hotkey_status(hotkey: Hotkey, hotkey_id: int) -> str:
 def status_text(_item=None) -> str:
     sel = _hotkey_status(current_hotkey, HOTKEY_ID)
     all_ = _hotkey_status(current_hotkey_all, HOTKEY_ALL_ID)
+    # Prefer the registered skill ids when present.
+    for hotkey_id, skill_id in skill_hotkey_ids.items():
+        if skill_id == "fix":
+            sel = _hotkey_status(current_hotkey, hotkey_id)
+        elif skill_id == "fix-all":
+            all_ = _hotkey_status(current_hotkey_all, hotkey_id)
     if paused.is_set():
         return f"Paused ({sel} / {all_})"
     if failed_hotkey_ids:
@@ -918,9 +1142,18 @@ def apply_hotkeys(
     current_hotkey_all = fix_all
     if translate is not None:
         current_hotkey_translate = translate
+    fix = skill_store.get("fix")
+    fix_all_skill = skill_store.get("fix-all")
+    tr = skill_store.get("translate")
+    if fix is not None:
+        fix.hotkey = "none" if selection.is_disabled else selection.display
+    if fix_all_skill is not None:
+        fix_all_skill.hotkey = "none" if fix_all.is_disabled else fix_all.display
+    if tr is not None and translate is not None:
+        tr.hotkey = "none" if translate.is_disabled else translate.display
     if persist:
         try:
-            save_settings(persist_hotkeys=True, persist_sensitivity=False)
+            save_settings(persist_hotkeys=True, persist_sensitivity=False, persist_skills=True)
         except Exception:
             logging.exception("Could not save config")
     post_to_hotkey_thread(WM_APP_RELOAD)
@@ -1088,14 +1321,21 @@ def _last_update_check_value() -> str:
 
 
 def apply_settings_data(data: SettingsData) -> None:
-    global translate_select_all, llm_config
+    global translate_select_all, llm_config, skill_store, current_hotkey_menu
     current_sensitivity_before = current_sensitivity
     apply_sensitivity_setting(data.sensitivity, persist=True)
+    skill_store = SkillStore(
+        version=getattr(skill_store, "version", 1),
+        skills=[Skill.from_dict(skill.to_dict()) for skill in (data.skills or [])] or list(skill_store.skills),
+        skill_menu_hotkey="none" if data.skill_menu_hotkey.is_disabled else data.skill_menu_hotkey.display,
+    )
+    current_hotkey_menu = data.skill_menu_hotkey
+    _sync_legacy_from_skills()
     translate_select_all = data.translate_select_all
     llm_config = data.llm
     apply_hotkeys(data.hotkey, data.hotkey_all, data.hotkey_translate, persist=True)
     try:
-        save_settings(persist_hotkeys=True, persist_sensitivity=True, persist_llm=True)
+        save_settings(persist_hotkeys=True, persist_sensitivity=True, persist_llm=True, persist_skills=True)
     except Exception:
         logging.exception("Could not save settings")
     if current_sensitivity_before != current_sensitivity:
@@ -1118,21 +1358,29 @@ def open_settings_window(_item=None, _icon=None) -> None:
         sensitivity=current_sensitivity,
         llm=llm_config,
         last_update_check=_last_update_check_value(),
+        skills=[Skill.from_dict(skill.to_dict()) for skill in skill_store.skills],
+        skill_menu_hotkey=current_hotkey_menu,
     )
     hooks = SettingsHooks(
         on_apply=apply_settings_data,
         on_check_updates=lambda: check_for_updates_menu(),
         on_live_sensitivity=lambda name: apply_sensitivity_setting(name, persist=True),
+        on_test_skill=test_skill_text,
     )
     open_settings(data, hooks)
 
 
 def failed_shortcut_reason() -> str:
     parts: list[str] = []
-    if HOTKEY_ID in failed_hotkey_ids:
-        parts.append(f"{current_hotkey.display} (fix selection)")
-    if HOTKEY_ALL_ID in failed_hotkey_ids:
-        parts.append(f"{current_hotkey_all.display} (fix all)")
+    if HOTKEY_MENU_ID in failed_hotkey_ids:
+        parts.append(f"{current_hotkey_menu.display} (skill menu)")
+    for hotkey_id, skill_id in skill_hotkey_ids.items():
+        if hotkey_id not in failed_hotkey_ids:
+            continue
+        skill = skill_store.get(skill_id)
+        label = skill.name if skill is not None else skill_id
+        hotkey = skill.hotkey_obj() if skill is not None else current_hotkey
+        parts.append(f"{hotkey.display} ({label})")
     if not parts:
         return "A shortcut is already in use by another program."
     return " and ".join(parts) + " already in use by another program."
@@ -1317,7 +1565,8 @@ def _sensitivity_item(name: str):
 def tray_title() -> str:
     sel = "off" if current_hotkey.is_disabled else current_hotkey.display
     all_ = "off" if current_hotkey_all.is_disabled else current_hotkey_all.display
-    return f"TinyFix — {sel} fixes selection, {all_} fixes all. Left-click fixes the clipboard."
+    menu = "off" if current_hotkey_menu.is_disabled else current_hotkey_menu.display
+    return f"TinyFix — {sel} fixes selection, {all_} fixes all, {menu} opens skills. Left-click fixes the clipboard."
 
 
 def setup_tray() -> None:
