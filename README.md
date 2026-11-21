@@ -1,5 +1,7 @@
 # TinyFix Hotkey
 
+![TinyFix Hotkey demo](docs/demo.gif)
+
 Fix English typos in any Windows app: select text, press your shortcut, done.
 
 ## Install
