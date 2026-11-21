@@ -1,0 +1,70 @@
+# -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_all
+
+root = Path(SPECPATH)
+datas = []
+binaries = []
+hiddenimports = [
+    "tkinter",
+    "_tkinter",
+    "engine",
+    "engine.fixer",
+    "engine.rules",
+    "engine.trie",
+    "engine.typo_cost",
+    "engine.wrong_word",
+    "tinyfix_lib",
+    "hotkey_util",
+]
+
+for pkg in ("onnxruntime", "pystray", "PIL"):
+    collected_datas, collected_binaries, collected_hidden = collect_all(pkg)
+    datas += collected_datas
+    binaries += collected_binaries
+    hiddenimports += collected_hidden
+
+for name in ("wrong-word.onnx", "wrong-word-vocab.txt", "wrong-word-confusions.txt", "words.txt"):
+    datas.append((str(root / "models" / name), "models"))
+
+icon = root / "assets" / "tinyfix.ico"
+if icon.exists():
+    datas.append((str(icon), "."))
+
+a = Analysis(
+    ["app.py"],
+    pathex=[str(root)],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="TinyFix",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    icon=str(icon) if icon.exists() else None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="TinyFix",
+)

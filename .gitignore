@@ -1,0 +1,21 @@
+# Build and packaging
+dist/
+build/
+.build-tools/
+*.egg-info/
+.venv/
+venv/
+
+# Model files are fetched at build time; do not commit them
+models/*
+!models/.gitkeep
+
+# Caches and local state
+cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.log
+*.pid
+config.ini

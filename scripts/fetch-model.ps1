@@ -1,0 +1,30 @@
+# Download paperweight/tinyfix model files into models/ (not committed).
+$ErrorActionPreference = 'Stop'
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+$Dest = Join-Path $RepoRoot 'models'
+$Revision = if ($env:TINYFIX_MODEL_REVISION) { $env:TINYFIX_MODEL_REVISION } else { '8efdf5cd91b32584f4077aa0e8ecaf48f7651bef' }
+
+if ($Revision.Length -lt 40) {
+    try {
+        $api = Invoke-RestMethod -Uri 'https://huggingface.co/api/models/paperweight/tinyfix/revision/main' -TimeoutSec 30
+        if ($api.sha -and $api.sha.StartsWith($Revision)) { $Revision = $api.sha }
+    } catch {
+        Write-Warning "Could not resolve revision via the Hugging Face API; using $Revision"
+    }
+}
+
+New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+$Base = "https://huggingface.co/paperweight/tinyfix/resolve/$Revision"
+$Files = @('wrong-word.onnx', 'wrong-word-vocab.txt', 'wrong-word-confusions.txt', 'words.txt')
+foreach ($Name in $Files) {
+    $Out = Join-Path $Dest $Name
+    if ((Test-Path $Out) -and ((Get-Item $Out).Length -gt 0)) {
+        Write-Host "Already have models\$Name"
+        continue
+    }
+    Write-Host "Downloading $Name from paperweight/tinyfix@$Revision ..."
+    & curl.exe -L --fail --retry 3 --retry-delay 2 -o $Out "$Base/$Name"
+    if ($LASTEXITCODE -ne 0) { throw "Failed to download $Name" }
+}
+Set-Content -Path (Join-Path $Dest 'REVISION.txt') -Value $Revision -Encoding utf8
+Write-Host "Model files are ready in $Dest (revision $Revision)"
