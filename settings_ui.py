@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import tkinter as tk
 import webbrowser
@@ -127,14 +128,18 @@ def _format_hotkey(hotkey: Hotkey) -> str:
 
 
 class SettingsWindow:
-    def __init__(self, data: SettingsData, hooks: SettingsHooks) -> None:
+    def __init__(self, data: SettingsData, hooks: SettingsHooks, master: tk.Misc | None = None) -> None:
         self.data = data
         self.hooks = hooks
         self._tested_ok = bool(data.llm.ready)
         self._loading = True
         self._record_target: tk.StringVar | None = None
         self._record_enabled: tk.BooleanVar | None = None
-        self.root = tk.Tk()
+        # Use a Toplevel when a dedicated UI thread already has a hidden root.
+        # Creating a second Tk() + mainloop() on the pystray thread makes
+        # controls appear but ignore clicks and never log a save.
+        self.root = tk.Toplevel(master) if master is not None else tk.Tk()
+        self._owns_mainloop = master is None
         self.root.title("TinyFix Settings")
         self.root.minsize(720, 560)
         self.root.geometry("760x640+340+120")
@@ -863,29 +868,43 @@ class SettingsWindow:
         )
 
     def _apply(self) -> bool:
-        data = self._collect()
+        logging.info("Settings apply requested")
+        try:
+            data = self._collect()
+        except Exception:
+            logging.exception("Settings could not be collected")
+            self.record_status.set("Could not save settings. See tinyfix.log for details.")
+            return False
         conflicts = find_conflicts(data.skills, data.skill_menu_hotkey)
         if conflicts:
             message = "Shortcut conflict: " + "; ".join(item.describe() for item in conflicts[:3])
+            logging.info("Settings apply blocked: %s", message)
             if hasattr(self, "skill_status"):
                 self.skill_status.set(message)
             self.record_status.set(message)
-            # Skills tab is index 1
             try:
                 self.notebook.select(1)
             except tk.TclError:
                 self.notebook.select(0)
             return False
-        self.hooks.on_apply(data)
+        try:
+            self.hooks.on_apply(data)
+        except Exception:
+            logging.exception("Settings apply callback failed")
+            self.record_status.set("Could not save settings. See tinyfix.log for details.")
+            return False
         self.data = data
         self.skills = [Skill.from_dict(skill.to_dict()) for skill in data.skills]
+        logging.info("Settings apply finished")
         return True
 
     def _ok(self) -> None:
+        logging.info("Settings OK clicked")
         if self._apply():
             self._close()
 
     def _cancel(self) -> None:
+        logging.info("Settings cancelled")
         self._close()
 
     def _close(self) -> None:
@@ -896,17 +915,27 @@ class SettingsWindow:
             _open_window = None
 
 
-def open_settings(data: SettingsData, hooks: SettingsHooks) -> None:
+def open_settings(data: SettingsData, hooks: SettingsHooks, master: tk.Misc | None = None) -> None:
     global _open_window
+    logging.info("Opening the Settings window")
     if _open_window is not None:
         try:
             _open_window.deiconify()
             _open_window.lift()
             _open_window.focus_force()
+            logging.info("Settings window already open; brought to front")
             return
         except tk.TclError:
             _open_window = None
-    window = SettingsWindow(data, hooks)
+    window = SettingsWindow(data, hooks, master=master)
     _open_window = window.root
-    window.root.mainloop()
-    _open_window = None
+    try:
+        window.root.deiconify()
+        window.root.lift()
+        window.root.focus_force()
+    except tk.TclError:
+        logging.exception("Could not focus the Settings window")
+    if window._owns_mainloop:
+        window.root.mainloop()
+        _open_window = None
+    logging.info("Settings window is ready")

@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.3.1"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -87,6 +87,7 @@ var
   ChosenHotkey: String;
   ChosenHotkeyAll: String;
   PrefillDone: Boolean;
+  AppWasRunning: Boolean;
 
 function GetCommandlineParam(const Name: String): String;
 var
@@ -345,6 +346,7 @@ var
   TitleSel, TitleAll, KeyLabel1, KeyLabel2: TNewStaticText;
   RowSel, RowAll, KeyTop1, KeyTop2: Integer;
 begin
+  AppWasRunning := False;
   ChosenHotkey := DefaultHotkey;
   ChosenHotkeyAll := DefaultHotkeyAll;
   if Trim(GetCommandlineParam('HOTKEY')) <> '' then
@@ -538,49 +540,92 @@ begin
     SetIniString('TinyFix', 'hotkey_all', ChosenHotkeyAll, Path);
     SetIniString('TinyFix', 'hotkey_translate', ResolveHotkey('HOTKEYTRANSLATE', 'hotkey_translate', '', DefaultHotkeyTranslate), Path);
     Log('Wrote hotkey=' + ChosenHotkey + ' hotkey_all=' + ChosenHotkeyAll + ' to ' + Path);
-    if HasCommandlineFlag('LAUNCH') then
+    if AppWasRunning or HasCommandlineFlag('LAUNCH') then
     begin
-      Log('Launching TinyFix after install');
+      if AppWasRunning then
+        Log('Relaunching TinyFix because it was running before install')
+      else
+        Log('Launching TinyFix because /LAUNCH was given');
       Exec(ExpandConstant('{app}\{#MyAppExeName}'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, ResultCode);
     end;
   end;
 end;
 
-procedure StopTinyFixInApp;
-var
-  Script, AppDir, Ps, Params: String;
-  ResultCode: Integer;
+function TinyFixStopScript: String;
 begin
-  AppDir := ExpandConstant('{app}');
-  Script := ExpandConstant('{tmp}\stop-tinyfix-in-dir.ps1');
-  if not FileExists(Script) then
+  Result := ExpandConstant('{tmp}\stop-tinyfix-in-dir.ps1');
+  if not FileExists(Result) then
   begin
     try
       ExtractTemporaryFile('stop-tinyfix-in-dir.ps1');
     except
     end;
   end;
-  if not FileExists(Script) then
-    Script := ExpandConstant('{app}\stop-tinyfix-in-dir.ps1');
+  if not FileExists(Result) then
+    Result := ExpandConstant('{app}\stop-tinyfix-in-dir.ps1');
+end;
+
+function RunTinyFixStopScript(const ListOnly: Boolean): Integer;
+var
+  Script, AppDir, Ps, Params: String;
+  ResultCode: Integer;
+begin
+  Result := -1;
+  Script := TinyFixStopScript;
   if not FileExists(Script) then
   begin
     Log('stop-tinyfix-in-dir.ps1 was not found; not stopping any TinyFix process');
     Exit;
   end;
+  AppDir := ExpandConstant('{app}');
   Ps := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   if not FileExists(Ps) then
     Ps := ExpandConstant('{syswow64}\WindowsPowerShell\v1.0\powershell.exe');
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -AppDir "' + AppDir + '"';
-  Log('Stopping TinyFix.exe only if it is running from ' + AppDir);
-  Exec(Ps, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ListOnly then
+    Params := Params + ' -RunningCheck';
+  if not Exec(Ps, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('Could not run the TinyFix stop script');
+    Result := -1;
+    Exit;
+  end;
+  Result := ResultCode;
+end;
+
+function TinyFixIsRunningInApp: Boolean;
+begin
+  { Exit code 10 from -ListOnly means a TinyFix.exe from {app} is running. }
+  Result := RunTinyFixStopScript(True) = 10;
+end;
+
+procedure StopTinyFixInApp;
+var
+  I, ResultCode: Integer;
+begin
+  Log('Stopping TinyFix.exe only if it is running from ' + ExpandConstant('{app}'));
+  ResultCode := RunTinyFixStopScript(False);
   Log('Targeted TinyFix stop finished with code ' + IntToStr(ResultCode));
+  I := 0;
+  while (I < 15) and TinyFixIsRunningInApp do
+  begin
+    Log('TinyFix.exe in {app} is still running; retrying stop');
+    Sleep(200);
+    RunTinyFixStopScript(False);
+    Inc(I);
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   NeedsRestart := False;
   Result := '';
+  AppWasRunning := TinyFixIsRunningInApp;
+  if AppWasRunning then
+    Log('TinyFix was running from {app}; it will be closed and relaunched after install');
   StopTinyFixInApp;
+  if TinyFixIsRunningInApp then
+    Log('Warning: TinyFix.exe in {app} is still running after the close attempt');
 end;
 
 function InitializeUninstall(): Boolean;

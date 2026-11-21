@@ -7,10 +7,12 @@ import pytest
 from update_check import (
     bump_patch,
     check_for_update,
+    format_update_feedback,
     is_newer,
     mark_checked,
     parse_version,
     should_auto_check,
+    short_update_error,
     fetch_latest_release,
     LatestRelease,
 )
@@ -135,3 +137,32 @@ def test_fetch_latest_release_rate_limit_is_an_error_and_not_a_successful_check(
     config = tmp_path / "config.ini"
     # A failed/rate-limited check must not mark the day as already checked.
     assert should_auto_check(config, today="2026-11-21")
+
+
+
+def test_format_update_feedback_covers_all_manual_outcomes():
+    release = LatestRelease("v1.3.1", "1.3.1", "https://example.invalid/TinyFix-Setup.exe", "x")
+    kind, message = format_update_feedback("1.3.0", True, release, None)
+    assert kind == "available"
+    assert "v1.3.1" in message
+    assert "Update now" in message
+
+    kind, message = format_update_feedback("1.3.1", False, release, None)
+    assert kind == "latest"
+    assert "latest version (v1.3.1)" in message
+
+    kind, message = format_update_feedback("1.3.1", False, None, "GitHub rate limited (403); will retry later")
+    assert kind == "error"
+    assert message.startswith("Couldn't check for updates:")
+    assert "rate limited" in message.lower()
+
+
+def test_manual_feedback_does_not_depend_on_once_a_day(tmp_path: Path):
+    config = tmp_path / "config.ini"
+    mark_checked(config, today="2026-11-22")
+    assert not should_auto_check(config, today="2026-11-22")
+    # A manual check still produces a visible latest/error/available message.
+    kind, message = format_update_feedback("1.3.1", False, None, None)
+    assert kind == "latest"
+    assert "v1.3.1" in message
+    assert "rate limited" in short_update_error("HTTP Error 403: rate limit exceeded")

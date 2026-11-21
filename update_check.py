@@ -174,3 +174,32 @@ def check_for_update(current_version: str, fetcher=fetch_latest_release) -> tupl
     except Exception as exc:
         return False, None, str(exc)
     return is_newer(latest.version, current_version), latest, None
+
+
+def short_update_error(error: str | None) -> str:
+    """A short, user-facing reason for a failed update check."""
+    text = " ".join(str(error or "unknown error").split())
+    lowered = text.lower()
+    if "rate limit" in lowered or " 403" in text or " 429" in text or "(403)" in text or "(429)" in text:
+        return "GitHub rate limited, try again later"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "the request timed out"
+    if "reach github" in lowered or "offline" in lowered or "urlopen" in lowered or "name or service" in lowered:
+        return "could not reach GitHub"
+    if len(text) > 80:
+        return text[:77] + "..."
+    return text
+
+
+def format_update_feedback(
+    current_version: str,
+    available: bool,
+    latest: LatestRelease | None,
+    error: str | None,
+) -> tuple[str, str]:
+    """Return (kind, message). kind is 'available', 'latest', or 'error'."""
+    if error:
+        return "error", f"Couldn't check for updates: {short_update_error(error)}"
+    if available and latest is not None:
+        return "available", f"TinyFix v{latest.version} is available. Update now?"
+    return "latest", f"You're on the latest version (v{current_version})."

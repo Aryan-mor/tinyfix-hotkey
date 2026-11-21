@@ -36,6 +36,10 @@ for pkg in ("onnxruntime", "pystray", "PIL", "sv_ttk"):
 for name in ("wrong-word.onnx", "wrong-word-vocab.txt", "wrong-word-confusions.txt", "words.txt"):
     datas.append((str(root / "models" / name), "models"))
 
+rev = root / "model-revision.txt"
+if rev.exists():
+    datas.append((str(rev), "."))
+
 icon = root / "assets" / "tinyfix.ico"
 if icon.exists():
     datas.append((str(icon), "."))

@@ -8,6 +8,7 @@ import configparser
 import ctypes
 import logging
 import os
+import queue
 import sys
 import threading
 import time
@@ -46,6 +47,7 @@ from update_check import (
     default_setup_download_path,
     download_file,
     fetch_latest_release,
+    format_update_feedback,
     is_newer,
     mark_checked,
     should_auto_check,
@@ -53,7 +55,8 @@ from update_check import (
 )
 
 APP_NAME = "TinyFix"
-APP_VERSION = "1.3.0"
+GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
+APP_VERSION = "1.3.1"
 MUTEX_NAME = "Local\\TinyFixHotkey"
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
@@ -273,6 +276,10 @@ failed_hotkey_ids: set[int] = set()
 tray_icon = None
 ui_lock = threading.Lock()
 pending_ui: list[tuple[str, object]] = []
+ui_work_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+ui_thread = None
+ui_root = None
+ui_ready = threading.Event()
 
 
 def setup_logging() -> None:
@@ -811,7 +818,11 @@ def on_skill_menu_hotkey() -> None:
     )
     if choice.cancelled or choice.skill is None:
         restore_foreground(hwnd)
-        logging.info("Skill menu cancelled")
+        logging.info(
+            "Skill menu cancelled (elapsed=%.0fms, result=%s)",
+            getattr(choice, "elapsed_ms", 0),
+            getattr(choice, "native_result", 0),
+        )
         return
     run_skill(choice.skill, target_hwnd=choice.target_hwnd)
 
@@ -998,9 +1009,214 @@ def post_to_hotkey_thread(message: int) -> None:
         user32.PostThreadMessageW(hotkey_thread_id, message, 0, 0)
 
 
+
+def safe_tray_action(fn):
+    """pystray swallows callback exceptions; always log them and tell the user."""
+
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            logging.exception("Tray menu action failed: %s", getattr(fn, "__name__", fn))
+            try:
+                notify("TinyFix", "Something went wrong. See tinyfix.log for details.")
+            except Exception:
+                pass
+
+    wrapper.__name__ = getattr(fn, "__name__", "tray_action")
+    wrapper.__wrapped__ = fn  # type: ignore[attr-defined]
+    return wrapper
+
+
+def model_revision_text() -> str:
+    for path in (RESOURCES / "model-revision.txt", ROOT / "model-revision.txt"):
+        if path.exists():
+            value = path.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+    return "unknown"
+
+
+def about_info() -> dict[str, str]:
+    return {
+        "version": APP_VERSION,
+        "model_revision": model_revision_text(),
+        "install_path": str(ROOT),
+        "github": GITHUB_URL,
+    }
+
+
+def start_ui_thread() -> None:
+    global ui_thread
+    if ui_thread is not None and ui_thread.is_alive():
+        return
+    ui_ready.clear()
+    ui_thread = threading.Thread(target=_ui_thread_main, name="tinyfix-ui", daemon=True)
+    ui_thread.start()
+    if not ui_ready.wait(timeout=5):
+        logging.warning("UI thread did not become ready")
+
+
+def _ui_thread_main() -> None:
+    global ui_root
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.attributes("-topmost", False)
+    except tk.TclError:
+        pass
+    ui_root = root
+    ui_ready.set()
+    logging.info("UI thread ready")
+
+    def pump() -> None:
+        try:
+            while True:
+                action, payload = ui_work_queue.get_nowait()
+                try:
+                    _dispatch_ui(action, payload)
+                except Exception:
+                    logging.exception("UI action failed: %s", action)
+        except queue.Empty:
+            pass
+        if not stop_event.is_set():
+            try:
+                root.after(50, pump)
+            except tk.TclError:
+                pass
+        else:
+            try:
+                root.quit()
+            except tk.TclError:
+                pass
+
+    root.after(50, pump)
+    try:
+        root.mainloop()
+    finally:
+        ui_root = None
+        logging.info("UI thread stopped")
+
+
+def _dispatch_ui(action: str, payload: object = None) -> None:
+    if action == "open-settings":
+        _open_settings_on_ui_thread()
+    elif action == "about":
+        _show_about_window()
+    elif action == "update-available" and isinstance(payload, LatestRelease):
+        prompt_update(payload)
+    elif action == "update-latest":
+        _show_info_dialog("TinyFix", str(payload or f"You are on the latest version (v{APP_VERSION})."))
+    elif action == "update-error":
+        _show_info_dialog("TinyFix", str(payload or "Couldn't check for updates."))
+    elif action == "change-failed":
+        reason = failed_shortcut_reason()
+        notify("TinyFix", reason)
+        _open_settings_on_ui_thread()
+    else:
+        logging.info("Unknown UI action: %s", action)
+
+
+def _show_info_dialog(title: str, message: str) -> None:
+    import tkinter as tk
+    from tkinter import messagebox
+
+    parent = ui_root
+    if parent is None:
+        notify(title, message)
+        return
+    try:
+        parent.deiconify()
+        parent.withdraw()
+        parent.attributes("-topmost", True)
+    except tk.TclError:
+        pass
+    try:
+        messagebox.showinfo(title, message, parent=parent)
+    finally:
+        try:
+            parent.attributes("-topmost", False)
+        except tk.TclError:
+            pass
+    logging.info("Shown message box: %s", message)
+
+
+def _open_settings_on_ui_thread() -> None:
+    data = SettingsData(
+        version=APP_VERSION,
+        hotkey=current_hotkey,
+        hotkey_all=current_hotkey_all,
+        hotkey_translate=current_hotkey_translate,
+        translate_select_all=translate_select_all,
+        sensitivity=current_sensitivity,
+        llm=llm_config,
+        last_update_check=_last_update_check_value(),
+        skills=[Skill.from_dict(skill.to_dict()) for skill in skill_store.skills],
+        skill_menu_hotkey=current_hotkey_menu,
+    )
+    hooks = SettingsHooks(
+        on_apply=apply_settings_data,
+        on_check_updates=lambda: check_for_updates_menu(),
+        on_live_sensitivity=lambda name: apply_sensitivity_setting(name, persist=True),
+        on_test_skill=test_skill_text,
+    )
+    logging.info("Presenting Settings on the UI thread")
+    open_settings(data, hooks, master=ui_root)
+
+
+def _show_about_window() -> None:
+    import tkinter as tk
+    import webbrowser
+    from tkinter import ttk
+
+    info = about_info()
+    logging.info(
+        "Opening About (version=%s, model=%s, path=%s)",
+        info["version"],
+        info["model_revision"],
+        info["install_path"],
+    )
+    parent = ui_root
+    window = tk.Toplevel(parent) if parent is not None else tk.Tk()
+    window.title("About TinyFix")
+    window.resizable(False, False)
+    window.geometry("+420+220")
+    try:
+        window.attributes("-topmost", True)
+        window.after(400, lambda: window.attributes("-topmost", False))
+    except tk.TclError:
+        pass
+    frame = ttk.Frame(window, padding=20)
+    frame.grid(row=0, column=0, sticky="nsew")
+    ttk.Label(frame, text=f"TinyFix Hotkey  v{info['version']}", font=("Segoe UI", 14, "bold")).grid(
+        row=0, column=0, sticky="w"
+    )
+    ttk.Label(frame, text=f"Model revision: {info['model_revision']}", wraplength=420).grid(
+        row=1, column=0, sticky="w", pady=(12, 0)
+    )
+    ttk.Label(frame, text=f"Install path: {info['install_path']}", wraplength=420).grid(
+        row=2, column=0, sticky="w", pady=(8, 0)
+    )
+    link = ttk.Label(frame, text=info["github"], foreground="#0b57d0", cursor="hand2")
+    link.grid(row=3, column=0, sticky="w", pady=(12, 0))
+    link.bind("<Button-1>", lambda *_: webbrowser.open(info["github"]))
+    buttons = ttk.Frame(frame)
+    buttons.grid(row=4, column=0, sticky="e", pady=(20, 0))
+    ttk.Button(buttons, text="Check for updates", command=lambda: check_for_updates_menu()).pack(side="left", padx=(0, 8))
+    ttk.Button(buttons, text="OK", command=window.destroy).pack(side="left")
+    try:
+        window.focus_force()
+    except tk.TclError:
+        pass
+
+
 def queue_ui(action: str, payload: object = None) -> None:
     with ui_lock:
         pending_ui.append((action, payload))
+    start_ui_thread()
+    ui_work_queue.put((action, payload))
     if tray_icon is not None:
         try:
             tray_icon.update_menu()
@@ -1124,6 +1340,7 @@ def pause_label(_item=None) -> str:
     return "Resume" if paused.is_set() else "Pause"
 
 
+@safe_tray_action
 def toggle_pause(_item=None, _icon=None) -> None:
     if paused.is_set():
         post_to_hotkey_thread(WM_APP_RESUME)
@@ -1311,6 +1528,7 @@ def show_hotkey_dialog(reason: str | None = None) -> None:
         apply_hotkeys(chosen[0], chosen[1])
 
 
+@safe_tray_action
 def change_shortcut(_item=None, _icon=None) -> None:
     open_settings_window()
 
@@ -1348,26 +1566,11 @@ def apply_settings_data(data: SettingsData) -> None:
     )
 
 
+@safe_tray_action
 def open_settings_window(_item=None, _icon=None) -> None:
-    data = SettingsData(
-        version=APP_VERSION,
-        hotkey=current_hotkey,
-        hotkey_all=current_hotkey_all,
-        hotkey_translate=current_hotkey_translate,
-        translate_select_all=translate_select_all,
-        sensitivity=current_sensitivity,
-        llm=llm_config,
-        last_update_check=_last_update_check_value(),
-        skills=[Skill.from_dict(skill.to_dict()) for skill in skill_store.skills],
-        skill_menu_hotkey=current_hotkey_menu,
-    )
-    hooks = SettingsHooks(
-        on_apply=apply_settings_data,
-        on_check_updates=lambda: check_for_updates_menu(),
-        on_live_sensitivity=lambda name: apply_sensitivity_setting(name, persist=True),
-        on_test_skill=test_skill_text,
-    )
-    open_settings(data, hooks)
+    logging.info("Settings requested from the tray")
+    start_ui_thread()
+    ui_work_queue.put(("open-settings", None))
 
 
 def failed_shortcut_reason() -> str:
@@ -1403,6 +1606,7 @@ def prompt_update(latest: LatestRelease) -> None:
     )
     root.destroy()
     if not answer:
+        logging.info("User declined the update to v%s", latest.version)
         return
     try:
         dest = default_setup_download_path()
@@ -1413,6 +1617,7 @@ def prompt_update(latest: LatestRelease) -> None:
         request_stop()
     except Exception:
         logging.exception("Could not apply the TinyFix update")
+        _show_info_dialog("TinyFix", "Couldn't install the update. See tinyfix.log for details.")
 
 
 def _is_rate_limit_error(error: str | None) -> bool:
@@ -1442,29 +1647,45 @@ def auto_update_check_worker() -> None:
 
 
 def manual_update_check_worker() -> None:
+    # Manual checks always run, even if we already auto-checked today.
+    logging.info("Manual update check starting (current v%s)", APP_VERSION)
     try:
         available, latest, error = check_for_update(APP_VERSION)
+        kind, message = format_update_feedback(APP_VERSION, available, latest, error)
+        logging.info("Manual update check result: %s (%s)", kind, message)
         if error:
-            if _is_rate_limit_error(error):
-                logging.info("Update check skipped (will retry later): %s", error)
-            else:
-                logging.info("Update check skipped: %s", error)
-                notify("TinyFix", "Could not check for updates right now")
+            start_ui_thread()
+            ui_work_queue.put(("update-error", message))
             return
         mark_checked(CONFIG_PATH)
-        if available and latest is not None:
-            queue_ui("update-available", latest)
+        if kind == "available" and latest is not None:
+            start_ui_thread()
+            ui_work_queue.put(("update-available", latest))
         else:
-            notify("TinyFix", f"You already have the latest version (v{APP_VERSION}).")
-            logging.info("No update available (current v%s)", APP_VERSION)
-    except Exception:
-        logging.info("Update check skipped", exc_info=True)
+            start_ui_thread()
+            ui_work_queue.put(("update-latest", message))
+    except Exception as exc:
+        logging.exception("Manual update check failed")
+        kind, message = format_update_feedback(APP_VERSION, False, None, str(exc))
+        start_ui_thread()
+        ui_work_queue.put(("update-error", message))
 
 
+@safe_tray_action
 def check_for_updates_menu(_item=None, _icon=None) -> None:
+    logging.info("Check for updates clicked")
+    notify("TinyFix", "Checking…")
     threading.Thread(target=manual_update_check_worker, name="tinyfix-update-manual", daemon=True).start()
 
 
+@safe_tray_action
+def open_about_window(_item=None, _icon=None) -> None:
+    logging.info("About TinyFix clicked")
+    start_ui_thread()
+    ui_work_queue.put(("about", None))
+
+
+@safe_tray_action
 def on_fix_clipboard(_item=None, _icon=None) -> None:
     if paused.is_set():
         logging.info("Clipboard fix ignored: paused")
@@ -1518,17 +1739,10 @@ def on_fix_clipboard(_item=None, _icon=None) -> None:
 
 
 def drain_ui_actions() -> None:
+    # Settings, About, and update dialogs run on the dedicated UI thread.
+    # Draining here would open a second Tk on the tray thread, so just clear.
     with ui_lock:
-        actions = list(pending_ui)
         pending_ui.clear()
-    for item in actions:
-        action, payload = item if isinstance(item, tuple) else (item, None)
-        if action == "change-failed":
-            reason = failed_shortcut_reason()
-            notify("TinyFix", reason)
-            open_settings_window()
-        elif action == "update-available" and isinstance(payload, LatestRelease):
-            prompt_update(payload)
 
 
 def make_icon():
@@ -1566,7 +1780,10 @@ def tray_title() -> str:
     sel = "off" if current_hotkey.is_disabled else current_hotkey.display
     all_ = "off" if current_hotkey_all.is_disabled else current_hotkey_all.display
     menu = "off" if current_hotkey_menu.is_disabled else current_hotkey_menu.display
-    return f"TinyFix — {sel} fixes selection, {all_} fixes all, {menu} opens skills. Left-click fixes the clipboard."
+    return (
+        f"TinyFix v{APP_VERSION} — {sel} fixes selection, {all_} fixes all, "
+        f"{menu} opens skills. Left-click fixes the clipboard."
+    )
 
 
 def setup_tray() -> None:
@@ -1581,6 +1798,7 @@ def setup_tray() -> None:
         pystray.MenuItem("Change shortcut…", change_shortcut),
         pystray.MenuItem("Sensitivity", pystray.Menu(*[_sensitivity_item(name) for name in SENSITIVITY_NAMES])),
         pystray.MenuItem("Check for updates", check_for_updates_menu),
+        pystray.MenuItem("About TinyFix", open_about_window),
         pystray.MenuItem("Exit", lambda *_: request_stop()),
     )
     tray_icon = pystray.Icon(
@@ -1592,6 +1810,7 @@ def setup_tray() -> None:
 
     def setup(icon: pystray.Icon) -> None:
         icon.visible = True
+        start_ui_thread()
         drain_ui_actions()
         threading.Thread(target=auto_update_check_worker, name="tinyfix-update", daemon=True).start()
 

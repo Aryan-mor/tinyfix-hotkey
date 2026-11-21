@@ -106,7 +106,9 @@ TinyFix-Setup.exe /VERYSILENT /HOTKEY=none /HOTKEYALL=none
 
 ## Updates
 
-TinyFix checks GitHub for a new release at most once a day when it starts, and whenever you choose **Check for updates** in the tray or in Settings. If a newer version is available it asks: “TinyFix vX.Y.Z is available. Update now?” Choosing Yes downloads `TinyFix-Setup.exe` and runs a silent upgrade that keeps your install folder, startup choice, and shortcuts, then relaunches the app. If the computer is offline, or GitHub rate-limits the check (HTTP 403/429), the attempt is only logged and is retried later — it does not count as a successful “checked today”.
+TinyFix checks GitHub for a new release at most once a day when it starts, and whenever you choose **Check for updates** in the tray, in Settings, or in **About TinyFix**. A manual check always runs (it ignores the once-a-day limit) and always shows visible feedback: first **Checking…**, then either the update prompt, **You're on the latest version (vX)**, or **Couldn't check for updates** with a short reason. Every step is written to `tinyfix.log`. If a newer version is available it asks: “TinyFix vX.Y.Z is available. Update now?” Choosing Yes downloads `TinyFix-Setup.exe` and runs a silent upgrade that closes only the TinyFix running from this install folder, keeps your folder, startup choice, shortcuts, and skills, then relaunches the app. If the computer is offline, or GitHub rate-limits the check (HTTP 403/429), a manual check still tells you; an automatic check is only logged and is retried later — it does not count as a successful “checked today”.
+
+**About TinyFix** in the tray menu shows the version, the bundled model revision, the install path, and a link to the GitHub project. The tray tooltip also includes the version, for example `TinyFix v1.3.1`.
 
 ## Uninstall
 

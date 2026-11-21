@@ -15,7 +15,10 @@ param(
     [string]$PathCheck,
 
     # If set, list matching processes as JSON and do not stop them.
-    [switch]$ListOnly
+    [switch]$ListOnly,
+
+    # If set, do not stop processes; exit 10 if any match, else 0.
+    [switch]$RunningCheck
 )
 
 Set-StrictMode -Version 1
@@ -46,12 +49,29 @@ function Test-ProcessPathInAppDir {
     return $full.StartsWith($AppDirPrefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-ProcessImagePath {
+    param($Process)
+    $path = $null
+    try { $path = $Process.Path } catch { $path = $null }
+    if (-not [string]::IsNullOrWhiteSpace($path)) {
+        return $path
+    }
+    try {
+        $cim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$($Process.Id)" -ErrorAction SilentlyContinue
+        if ($cim -and $cim.ExecutablePath) {
+            return [string]$cim.ExecutablePath
+        }
+    }
+    catch {
+    }
+    return $null
+}
+
 function Get-TinyFixProcessesInAppDir {
     param([Parameter(Mandatory = $true)][string]$Dir)
     $prefix = Get-AppDirPrefix $Dir
     Get-Process -Name 'TinyFix' -ErrorAction SilentlyContinue | ForEach-Object {
-        $path = $null
-        try { $path = $_.Path } catch { $path = $null }
+        $path = Get-ProcessImagePath $_
         if (Test-ProcessPathInAppDir -ProcessPath $path -AppDirPrefix $prefix) {
             $_
         }
@@ -72,21 +92,31 @@ if ($PSBoundParameters.ContainsKey('PathCheck')) {
 $matches = @(Get-TinyFixProcessesInAppDir -Dir $AppDir)
 $payload = @(
     $matches | ForEach-Object {
-        $path = $null
-        try { $path = $_.Path } catch { $path = $null }
-        [pscustomobject]@{ Id = $_.Id; Path = $path }
+        [pscustomobject]@{ Id = $_.Id; Path = (Get-ProcessImagePath $_) }
     }
 )
 function Write-PayloadJson($Items) {
     Write-Output (ConvertTo-Json -InputObject @($Items) -Compress)
 }
 
-if ($ListOnly) {
+if ($ListOnly -or $RunningCheck) {
     Write-PayloadJson $payload
-    exit 0
+    if ($RunningCheck -and $payload.Count -gt 0) { exit 10 } else { exit 0 }
 }
 
 foreach ($proc in $matches) {
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 }
+
+$deadline = (Get-Date).AddSeconds(8)
+while ((Get-Date) -lt $deadline) {
+    $still = @(Get-TinyFixProcessesInAppDir -Dir $AppDir)
+    if ($still.Count -eq 0) {
+        break
+    }
+    Start-Sleep -Milliseconds 200
+}
+
 Write-PayloadJson $payload
+$remaining = @(Get-TinyFixProcessesInAppDir -Dir $AppDir)
+if ($remaining.Count -gt 0) { exit 11 } else { exit 0 }
