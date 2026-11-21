@@ -1,0 +1,4 @@
+onnxruntime>=1.20
+numpy>=1.26
+pystray>=0.19
+pillow>=10.0
