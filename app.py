@@ -42,7 +42,7 @@ from update_check import (
 )
 
 APP_NAME = "TinyFix"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 MUTEX_NAME = "Local\\TinyFixHotkey"
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1

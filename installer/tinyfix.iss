@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -34,8 +34,9 @@ SetupLogging=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-CloseApplications=force
-CloseApplicationsFilter=TinyFix.exe
+; Do not close every TinyFix.exe on the machine. PrepareToInstall and
+; InitializeUninstall call StopTinyFixInApp, which only stops {app}\TinyFix.exe.
+CloseApplications=no
 MinVersion=10.0
 UsedUserAreasWarning=no
 
@@ -47,6 +48,8 @@ Name: "autostart"; Description: "Start TinyFix when I sign in to Windows"; Group
 
 [Files]
 Source: "..\dist\TinyFix\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\scripts\stop-tinyfix-in-dir.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\scripts\stop-tinyfix-in-dir.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\TinyFix"; Filename: "{app}\{#MyAppExeName}"; Comment: "Correct selected English text with a shortcut"
@@ -542,11 +545,46 @@ begin
   end;
 end;
 
-function InitializeUninstall(): Boolean;
+procedure StopTinyFixInApp;
 var
+  Script, AppDir, Ps, Params: String;
   ResultCode: Integer;
 begin
-  Result := True;
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM TinyFix.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  AppDir := ExpandConstant('{app}');
+  Script := ExpandConstant('{tmp}\stop-tinyfix-in-dir.ps1');
+  if not FileExists(Script) then
+  begin
+    try
+      ExtractTemporaryFile('stop-tinyfix-in-dir.ps1');
+    except
+    end;
+  end;
+  if not FileExists(Script) then
+    Script := ExpandConstant('{app}\stop-tinyfix-in-dir.ps1');
+  if not FileExists(Script) then
+  begin
+    Log('stop-tinyfix-in-dir.ps1 was not found; not stopping any TinyFix process');
+    Exit;
+  end;
+  Ps := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  if not FileExists(Ps) then
+    Ps := ExpandConstant('{syswow64}\WindowsPowerShell\v1.0\powershell.exe');
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -AppDir "' + AppDir + '"';
+  Log('Stopping TinyFix.exe only if it is running from ' + AppDir);
+  Exec(Ps, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Log('Targeted TinyFix stop finished with code ' + IntToStr(ResultCode));
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  NeedsRestart := False;
+  Result := '';
+  StopTinyFixInApp;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  StopTinyFixInApp;
   Sleep(400);
+  Result := True;
 end;
