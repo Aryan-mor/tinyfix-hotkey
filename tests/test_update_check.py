@@ -114,3 +114,24 @@ def test_check_for_update_reports_availability_and_errors():
 
     available, found, error = check_for_update("1.0.0", fetcher=boom)
     assert not available and found is None and "offline" in error
+
+
+def test_fetch_latest_release_rate_limit_is_an_error_and_not_a_successful_check(tmp_path: Path):
+    import urllib.error
+    from update_check import should_auto_check
+
+    def opener(request, timeout=15):
+        raise urllib.error.HTTPError(request.full_url, 403, "rate limit", hdrs=None, fp=None)
+
+    with pytest.raises(ConnectionError, match=r"rate limited \(403\)"):
+        fetch_latest_release(opener=opener)
+
+    def boom_429():
+        raise ConnectionError("GitHub rate limited (429); will retry later")
+
+    available, found, error = check_for_update("1.0.0", fetcher=boom_429)
+    assert not available and found is None
+    assert error is not None and "429" in error
+    config = tmp_path / "config.ini"
+    # A failed/rate-limited check must not mark the day as already checked.
+    assert should_auto_check(config, today="2026-11-21")

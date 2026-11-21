@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -61,14 +61,19 @@ Type: files; Name: "{app}\config.ini"
 [Code]
 const
   DefaultHotkey = 'Ctrl+Alt+Space';
+  DefaultHotkeyAll = 'Ctrl+F3';
+  DisabledHotkey = 'none';
+  DisabledKeyLabel = 'None/Disabled';
 
 var
   HotkeyPage: TWizardPage;
-  ChkCtrl, ChkAlt, ChkShift, ChkWin: TNewCheckBox;
-  KeyCombo: TNewComboBox;
-  PreviewLabel: TNewStaticText;
+  SelCtrl, SelAlt, SelShift, SelWin: TNewCheckBox;
+  AllCtrl, AllAlt, AllShift, AllWin: TNewCheckBox;
+  SelKey, AllKey: TNewComboBox;
+  SelPreview, AllPreview: TNewStaticText;
   HintLabel: TNewStaticText;
   ChosenHotkey: String;
+  ChosenHotkeyAll: String;
   PrefillDone: Boolean;
 
 function GetCommandlineParam(const Name: String): String;
@@ -93,8 +98,7 @@ end;
 function HasCommandlineFlag(const Name: String): Boolean;
 var
   I: Integer;
-  S, Prefix: String;
-  Value: String;
+  S, Prefix, Value: String;
 begin
   Result := False;
   Prefix := '/' + Name + '=';
@@ -115,75 +119,28 @@ begin
   end;
 end;
 
-function ReadExistingHotkey: String;
+function ReadExistingIni(const Key, Fallback: String): String;
 var
-  Path: String;
+  Path, Value: String;
 begin
-  Result := '';
+  Result := Fallback;
   Path := ExpandConstant('{app}\config.ini');
   if FileExists(Path) then
-    Result := Trim(GetIniString('TinyFix', 'hotkey', '', Path));
-end;
-
-function GetHotkeyFromCommandlineOrDefault: String;
-var
-  Cmd: String;
-begin
-  Cmd := Trim(GetCommandlineParam('HOTKEY'));
-  if Cmd <> '' then
-    Result := Cmd
-  else
-    Result := DefaultHotkey;
-end;
-
-procedure FillKeyCombo;
-var
-  I: Integer;
-  Letters: String;
-begin
-  for I := 1 to 12 do
-    KeyCombo.Items.Add('F' + IntToStr(I));
-  KeyCombo.Items.Add('Space');
-  Letters := 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  for I := 1 to Length(Letters) do
-    KeyCombo.Items.Add(Letters[I]);
-  for I := 0 to 9 do
-    KeyCombo.Items.Add(IntToStr(I));
-  KeyCombo.Items.Add('Tab');
-  KeyCombo.Items.Add('Enter');
-  KeyCombo.Items.Add('Esc');
-  KeyCombo.Items.Add('Backspace');
-  KeyCombo.Items.Add('Insert');
-  KeyCombo.Items.Add('Delete');
-  KeyCombo.Items.Add('Home');
-  KeyCombo.Items.Add('End');
-  KeyCombo.Items.Add('PageUp');
-  KeyCombo.Items.Add('PageDown');
-  KeyCombo.Items.Add('Left');
-  KeyCombo.Items.Add('Right');
-  KeyCombo.Items.Add('Up');
-  KeyCombo.Items.Add('Down');
-end;
-
-procedure SelectKeyInCombo(const Key: String);
-var
-  I: Integer;
-begin
-  for I := 0 to KeyCombo.Items.Count - 1 do
   begin
-    if CompareText(KeyCombo.Items[I], Key) = 0 then
-    begin
-      KeyCombo.ItemIndex := I;
-      Exit;
-    end;
+    Value := Trim(GetIniString('TinyFix', Key, '', Path));
+    if Value <> '' then
+      Result := Value;
   end;
-  if Key <> '' then
-  begin
-    KeyCombo.Items.Add(Key);
-    KeyCombo.ItemIndex := KeyCombo.Items.Count - 1;
-  end
-  else
-    KeyCombo.ItemIndex := KeyCombo.Items.IndexOf('Space');
+end;
+
+function IsDisabledSpec(const Spec: String): Boolean;
+var
+  U: String;
+begin
+  U := LowerCase(Trim(Spec));
+  StringChangeEx(U, ' ', '', True);
+  StringChangeEx(U, '-', '/', True);
+  Result := (U = 'none') or (U = 'disabled') or (U = 'off') or (U = 'no') or (U = 'none/disabled');
 end;
 
 function IsFunctionKey(const Key: String): Boolean;
@@ -199,41 +156,117 @@ begin
   Result := (N >= 1) and (N <= 24);
 end;
 
-function HotkeyFromControls: String;
+procedure FillKeyCombo(Combo: TNewComboBox);
 var
-  S: String;
+  I: Integer;
+  Letters: String;
 begin
+  Combo.Items.Add(DisabledKeyLabel);
+  for I := 1 to 12 do
+    Combo.Items.Add('F' + IntToStr(I));
+  Combo.Items.Add('Space');
+  Letters := 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  for I := 1 to Length(Letters) do
+    Combo.Items.Add(Letters[I]);
+  for I := 0 to 9 do
+    Combo.Items.Add(IntToStr(I));
+  Combo.Items.Add('Tab');
+  Combo.Items.Add('Enter');
+  Combo.Items.Add('Esc');
+  Combo.Items.Add('Backspace');
+  Combo.Items.Add('Insert');
+  Combo.Items.Add('Delete');
+  Combo.Items.Add('Home');
+  Combo.Items.Add('End');
+  Combo.Items.Add('PageUp');
+  Combo.Items.Add('PageDown');
+  Combo.Items.Add('Left');
+  Combo.Items.Add('Right');
+  Combo.Items.Add('Up');
+  Combo.Items.Add('Down');
+end;
+
+procedure SelectKeyInCombo(Combo: TNewComboBox; const Key: String);
+var
+  I: Integer;
+  Target: String;
+begin
+  if IsDisabledSpec(Key) then
+    Target := DisabledKeyLabel
+  else
+    Target := Key;
+  for I := 0 to Combo.Items.Count - 1 do
+  begin
+    if CompareText(Combo.Items[I], Target) = 0 then
+    begin
+      Combo.ItemIndex := I;
+      Exit;
+    end;
+  end;
+  if Target <> '' then
+  begin
+    Combo.Items.Add(Target);
+    Combo.ItemIndex := Combo.Items.Count - 1;
+  end
+  else
+    Combo.ItemIndex := Combo.Items.IndexOf(DisabledKeyLabel);
+end;
+
+function KeyNameFromCombo(Combo: TNewComboBox): String;
+begin
+  if Combo.ItemIndex >= 0 then
+    Result := Combo.Text
+  else
+    Result := '';
+end;
+
+function HotkeyFromControls(ChkCtrl, ChkAlt, ChkShift, ChkWin: TNewCheckBox; Combo: TNewComboBox): String;
+var
+  S, Key: String;
+begin
+  Key := KeyNameFromCombo(Combo);
+  if IsDisabledSpec(Key) or (Key = '') then
+  begin
+    Result := DisabledHotkey;
+    Exit;
+  end;
   S := '';
   if ChkCtrl.Checked then S := S + 'Ctrl+';
   if ChkAlt.Checked then S := S + 'Alt+';
   if ChkShift.Checked then S := S + 'Shift+';
   if ChkWin.Checked then S := S + 'Win+';
-  if KeyCombo.ItemIndex >= 0 then
-    S := S + KeyCombo.Text
-  else
-    S := S + 'Space';
-  Result := S;
+  Result := S + Key;
 end;
 
-procedure UpdatePreview(Sender: TObject);
+procedure UpdatePreviews(Sender: TObject);
 var
-  S, Key: String;
+  Sel, AllKeyText, SelKeyText: String;
 begin
-  S := HotkeyFromControls;
-  PreviewLabel.Caption := 'Shortcut: ' + S;
-  if KeyCombo.ItemIndex >= 0 then
-    Key := KeyCombo.Text
+  Sel := HotkeyFromControls(SelCtrl, SelAlt, SelShift, SelWin, SelKey);
+  if IsDisabledSpec(Sel) then
+    SelPreview.Caption := 'Fix selection: Disabled'
   else
-    Key := '';
-  if (not IsFunctionKey(Key)) and
-     (not ChkCtrl.Checked) and (not ChkAlt.Checked) and
-     (not ChkShift.Checked) and (not ChkWin.Checked) then
-    HintLabel.Caption := 'Please add a modifier (Ctrl, Alt, Shift, or Win) for this key.'
+    SelPreview.Caption := 'Fix selection: ' + Sel;
+
+  Sel := HotkeyFromControls(AllCtrl, AllAlt, AllShift, AllWin, AllKey);
+  if IsDisabledSpec(Sel) then
+    AllPreview.Caption := 'Fix all: Disabled'
   else
-    HintLabel.Caption := 'Select text in any app, then press this shortcut to correct English typos.';
+    AllPreview.Caption := 'Fix all: ' + Sel;
+
+  SelKeyText := KeyNameFromCombo(SelKey);
+  AllKeyText := KeyNameFromCombo(AllKey);
+  if (not IsDisabledSpec(SelKeyText)) and (SelKeyText <> '') and (not IsFunctionKey(SelKeyText)) and
+     (not SelCtrl.Checked) and (not SelAlt.Checked) and (not SelShift.Checked) and (not SelWin.Checked) then
+    HintLabel.Caption := 'Please add a modifier (Ctrl, Alt, Shift, or Win) for the Fix selection key.'
+  else if (not IsDisabledSpec(AllKeyText)) and (AllKeyText <> '') and (not IsFunctionKey(AllKeyText)) and
+     (not AllCtrl.Checked) and (not AllAlt.Checked) and (not AllShift.Checked) and (not AllWin.Checked) then
+    HintLabel.Caption := 'Please add a modifier (Ctrl, Alt, Shift, or Win) for the Fix all key.'
+  else
+    HintLabel.Caption := 'Fix selection corrects the highlighted text. Fix all selects the whole field first. Either shortcut can be disabled. Left-click the tray icon to fix the clipboard.';
 end;
 
-procedure ApplyHotkeyToControls(const Spec: String);
+procedure ApplyHotkeyToControls(const Spec: String; ChkCtrl, ChkAlt, ChkShift, ChkWin: TNewCheckBox; Combo: TNewComboBox);
 var
   U, Part, Key: String;
   P: Integer;
@@ -244,6 +277,12 @@ begin
   ChkWin.Checked := False;
   Key := '';
   U := Trim(Spec);
+  if IsDisabledSpec(U) then
+  begin
+    SelectKeyInCombo(Combo, DisabledKeyLabel);
+    UpdatePreviews(nil);
+    Exit;
+  end;
   StringChangeEx(U, '-', '+', True);
   while U <> '' do
   begin
@@ -274,119 +313,157 @@ begin
   end;
   if Key = '' then
     Key := 'Space';
-  SelectKeyInCombo(Key);
-  UpdatePreview(nil);
+  SelectKeyInCombo(Combo, Key);
+  UpdatePreviews(nil);
+end;
+
+function CreateModifier(Page: TWizardPage; const Caption: String; Top, Left: Integer): TNewCheckBox;
+begin
+  Result := TNewCheckBox.Create(Page);
+  Result.Parent := Page.Surface;
+  Result.Caption := Caption;
+  Result.Top := Top;
+  Result.Left := Left;
+  Result.Width := ScaleX(70);
+  Result.OnClick := @UpdatePreviews;
 end;
 
 procedure InitializeWizard;
 var
-  ModsLabel, KeyLabel: TNewStaticText;
+  TitleSel, TitleAll, KeyLabel1, KeyLabel2: TNewStaticText;
+  RowSel, RowAll, KeyTop1, KeyTop2: Integer;
 begin
-  ChosenHotkey := GetHotkeyFromCommandlineOrDefault;
+  ChosenHotkey := DefaultHotkey;
+  ChosenHotkeyAll := DefaultHotkeyAll;
+  if Trim(GetCommandlineParam('HOTKEY')) <> '' then
+    ChosenHotkey := Trim(GetCommandlineParam('HOTKEY'));
+  if Trim(GetCommandlineParam('HOTKEYALL')) <> '' then
+    ChosenHotkeyAll := Trim(GetCommandlineParam('HOTKEYALL'));
 
-  HotkeyPage := CreateCustomPage(wpSelectTasks, 'Choose your shortcut',
-    'Pick the keyboard shortcut used to correct selected text.');
+  HotkeyPage := CreateCustomPage(wpSelectTasks, 'Choose your shortcuts',
+    'Pick keyboard shortcuts for fixing a selection or the whole field. Either one can be disabled.');
 
-  ModsLabel := TNewStaticText.Create(HotkeyPage);
-  ModsLabel.Parent := HotkeyPage.Surface;
-  ModsLabel.Caption := 'Modifiers:';
-  ModsLabel.Top := ScaleY(8);
-  ModsLabel.Left := 0;
+  TitleSel := TNewStaticText.Create(HotkeyPage);
+  TitleSel.Parent := HotkeyPage.Surface;
+  TitleSel.Caption := 'Fix selection';
+  TitleSel.Font.Style := [fsBold];
+  TitleSel.Top := ScaleY(4);
+  TitleSel.Left := 0;
 
-  ChkCtrl := TNewCheckBox.Create(HotkeyPage);
-  ChkCtrl.Parent := HotkeyPage.Surface;
-  ChkCtrl.Caption := 'Ctrl';
-  ChkCtrl.Top := ModsLabel.Top + ModsLabel.Height + ScaleY(8);
-  ChkCtrl.Left := 0;
-  ChkCtrl.Width := ScaleX(70);
-  ChkCtrl.OnClick := @UpdatePreview;
+  RowSel := TitleSel.Top + TitleSel.Height + ScaleY(6);
+  SelCtrl := CreateModifier(HotkeyPage, 'Ctrl', RowSel, 0);
+  SelAlt := CreateModifier(HotkeyPage, 'Alt', RowSel, ScaleX(80));
+  SelShift := CreateModifier(HotkeyPage, 'Shift', RowSel, ScaleX(160));
+  SelShift.Width := ScaleX(80);
+  SelWin := CreateModifier(HotkeyPage, 'Win', RowSel, ScaleX(250));
 
-  ChkAlt := TNewCheckBox.Create(HotkeyPage);
-  ChkAlt.Parent := HotkeyPage.Surface;
-  ChkAlt.Caption := 'Alt';
-  ChkAlt.Top := ChkCtrl.Top;
-  ChkAlt.Left := ScaleX(80);
-  ChkAlt.Width := ScaleX(70);
-  ChkAlt.OnClick := @UpdatePreview;
+  KeyLabel1 := TNewStaticText.Create(HotkeyPage);
+  KeyLabel1.Parent := HotkeyPage.Surface;
+  KeyLabel1.Caption := 'Key:';
+  KeyTop1 := RowSel + SelCtrl.Height + ScaleY(8);
+  KeyLabel1.Top := KeyTop1 + ScaleY(2);
+  KeyLabel1.Left := 0;
 
-  ChkShift := TNewCheckBox.Create(HotkeyPage);
-  ChkShift.Parent := HotkeyPage.Surface;
-  ChkShift.Caption := 'Shift';
-  ChkShift.Top := ChkCtrl.Top;
-  ChkShift.Left := ScaleX(160);
-  ChkShift.Width := ScaleX(80);
-  ChkShift.OnClick := @UpdatePreview;
+  SelKey := TNewComboBox.Create(HotkeyPage);
+  SelKey.Parent := HotkeyPage.Surface;
+  SelKey.Style := csDropDownList;
+  SelKey.Top := KeyTop1;
+  SelKey.Left := ScaleX(50);
+  SelKey.Width := ScaleX(180);
+  SelKey.OnChange := @UpdatePreviews;
+  FillKeyCombo(SelKey);
 
-  ChkWin := TNewCheckBox.Create(HotkeyPage);
-  ChkWin.Parent := HotkeyPage.Surface;
-  ChkWin.Caption := 'Win';
-  ChkWin.Top := ChkCtrl.Top;
-  ChkWin.Left := ScaleX(250);
-  ChkWin.Width := ScaleX(70);
-  ChkWin.OnClick := @UpdatePreview;
+  SelPreview := TNewStaticText.Create(HotkeyPage);
+  SelPreview.Parent := HotkeyPage.Surface;
+  SelPreview.Top := SelKey.Top + SelKey.Height + ScaleY(8);
+  SelPreview.Left := 0;
+  SelPreview.Caption := 'Fix selection: Ctrl+Alt+Space';
+  SelPreview.Font.Style := [fsBold];
 
-  KeyLabel := TNewStaticText.Create(HotkeyPage);
-  KeyLabel.Parent := HotkeyPage.Surface;
-  KeyLabel.Caption := 'Key:';
-  KeyLabel.Top := ChkCtrl.Top + ChkCtrl.Height + ScaleY(20);
-  KeyLabel.Left := 0;
+  TitleAll := TNewStaticText.Create(HotkeyPage);
+  TitleAll.Parent := HotkeyPage.Surface;
+  TitleAll.Caption := 'Fix all (select the whole field first)';
+  TitleAll.Font.Style := [fsBold];
+  TitleAll.Top := SelPreview.Top + SelPreview.Height + ScaleY(16);
+  TitleAll.Left := 0;
 
-  KeyCombo := TNewComboBox.Create(HotkeyPage);
-  KeyCombo.Parent := HotkeyPage.Surface;
-  KeyCombo.Style := csDropDownList;
-  KeyCombo.Top := KeyLabel.Top - ScaleY(2);
-  KeyCombo.Left := ScaleX(50);
-  KeyCombo.Width := ScaleX(180);
-  KeyCombo.OnChange := @UpdatePreview;
-  FillKeyCombo;
+  RowAll := TitleAll.Top + TitleAll.Height + ScaleY(6);
+  AllCtrl := CreateModifier(HotkeyPage, 'Ctrl', RowAll, 0);
+  AllAlt := CreateModifier(HotkeyPage, 'Alt', RowAll, ScaleX(80));
+  AllShift := CreateModifier(HotkeyPage, 'Shift', RowAll, ScaleX(160));
+  AllShift.Width := ScaleX(80);
+  AllWin := CreateModifier(HotkeyPage, 'Win', RowAll, ScaleX(250));
 
-  PreviewLabel := TNewStaticText.Create(HotkeyPage);
-  PreviewLabel.Parent := HotkeyPage.Surface;
-  PreviewLabel.Top := KeyCombo.Top + KeyCombo.Height + ScaleY(24);
-  PreviewLabel.Left := 0;
-  PreviewLabel.Caption := 'Shortcut: Ctrl+Alt+Space';
-  PreviewLabel.Font.Style := [fsBold];
-  PreviewLabel.Font.Size := 11;
+  KeyLabel2 := TNewStaticText.Create(HotkeyPage);
+  KeyLabel2.Parent := HotkeyPage.Surface;
+  KeyLabel2.Caption := 'Key:';
+  KeyTop2 := RowAll + AllCtrl.Height + ScaleY(8);
+  KeyLabel2.Top := KeyTop2 + ScaleY(2);
+  KeyLabel2.Left := 0;
+
+  AllKey := TNewComboBox.Create(HotkeyPage);
+  AllKey.Parent := HotkeyPage.Surface;
+  AllKey.Style := csDropDownList;
+  AllKey.Top := KeyTop2;
+  AllKey.Left := ScaleX(50);
+  AllKey.Width := ScaleX(180);
+  AllKey.OnChange := @UpdatePreviews;
+  FillKeyCombo(AllKey);
+
+  AllPreview := TNewStaticText.Create(HotkeyPage);
+  AllPreview.Parent := HotkeyPage.Surface;
+  AllPreview.Top := AllKey.Top + AllKey.Height + ScaleY(8);
+  AllPreview.Left := 0;
+  AllPreview.Caption := 'Fix all: Ctrl+F3';
+  AllPreview.Font.Style := [fsBold];
 
   HintLabel := TNewStaticText.Create(HotkeyPage);
   HintLabel.Parent := HotkeyPage.Surface;
-  HintLabel.Top := PreviewLabel.Top + PreviewLabel.Height + ScaleY(12);
+  HintLabel.Top := AllPreview.Top + AllPreview.Height + ScaleY(12);
   HintLabel.Left := 0;
   HintLabel.AutoSize := False;
   HintLabel.WordWrap := True;
   HintLabel.Width := HotkeyPage.SurfaceWidth;
-  HintLabel.Height := ScaleY(48);
-  HintLabel.Caption := 'Select text in any app, then press this shortcut to correct English typos.';
+  HintLabel.Height := ScaleY(52);
+  HintLabel.Caption := 'Fix selection corrects the highlighted text. Fix all selects the whole field first. Either shortcut can be disabled. Left-click the tray icon to fix the clipboard.';
 
-  ApplyHotkeyToControls(ChosenHotkey);
+  ApplyHotkeyToControls(ChosenHotkey, SelCtrl, SelAlt, SelShift, SelWin, SelKey);
+  ApplyHotkeyToControls(ChosenHotkeyAll, AllCtrl, AllAlt, AllShift, AllWin, AllKey);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  Key: String;
+  Key, SelSpec, AllSpec: String;
 begin
   Result := True;
   if (HotkeyPage <> nil) and (CurPageID = HotkeyPage.ID) then
   begin
-    if KeyCombo.ItemIndex >= 0 then
-      Key := KeyCombo.Text
-    else
-      Key := '';
-    if Key = '' then
+    Key := KeyNameFromCombo(SelKey);
+    if (not IsDisabledSpec(Key)) and (Key <> '') and (not IsFunctionKey(Key)) and
+       (not SelCtrl.Checked) and (not SelAlt.Checked) and (not SelShift.Checked) and (not SelWin.Checked) then
     begin
-      MsgBox('Please choose a key for your shortcut.', mbError, MB_OK);
+      MsgBox('Please add at least one modifier (Ctrl, Alt, Shift, or Win) for Fix selection, unless you use a function key or None/Disabled.', mbError, MB_OK);
       Result := False;
       Exit;
     end;
-    if (not IsFunctionKey(Key)) and
-       (not ChkCtrl.Checked) and (not ChkAlt.Checked) and
-       (not ChkShift.Checked) and (not ChkWin.Checked) then
+    Key := KeyNameFromCombo(AllKey);
+    if (not IsDisabledSpec(Key)) and (Key <> '') and (not IsFunctionKey(Key)) and
+       (not AllCtrl.Checked) and (not AllAlt.Checked) and (not AllShift.Checked) and (not AllWin.Checked) then
     begin
-      MsgBox('Please add at least one modifier (Ctrl, Alt, Shift, or Win) unless you use a function key.', mbError, MB_OK);
+      MsgBox('Please add at least one modifier (Ctrl, Alt, Shift, or Win) for Fix all, unless you use a function key or None/Disabled.', mbError, MB_OK);
       Result := False;
       Exit;
     end;
-    ChosenHotkey := HotkeyFromControls;
+    SelSpec := HotkeyFromControls(SelCtrl, SelAlt, SelShift, SelWin, SelKey);
+    AllSpec := HotkeyFromControls(AllCtrl, AllAlt, AllShift, AllWin, AllKey);
+    if (not IsDisabledSpec(SelSpec)) and (not IsDisabledSpec(AllSpec)) and (CompareText(SelSpec, AllSpec) = 0) then
+    begin
+      MsgBox('Please choose two different shortcuts, or disable one of them.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+    ChosenHotkey := SelSpec;
+    ChosenHotkeyAll := AllSpec;
   end;
 end;
 
@@ -399,36 +476,55 @@ begin
     PrefillDone := True;
     if Trim(GetCommandlineParam('HOTKEY')) = '' then
     begin
-      Existing := ReadExistingHotkey;
+      Existing := ReadExistingIni('hotkey', '');
       if Existing <> '' then
-        ApplyHotkeyToControls(Existing);
+        ApplyHotkeyToControls(Existing, SelCtrl, SelAlt, SelShift, SelWin, SelKey);
+    end;
+    if Trim(GetCommandlineParam('HOTKEYALL')) = '' then
+    begin
+      Existing := ReadExistingIni('hotkey_all', '');
+      if Existing <> '' then
+        ApplyHotkeyToControls(Existing, AllCtrl, AllAlt, AllShift, AllWin, AllKey);
     end;
   end;
 end;
 
+function ResolveHotkey(const CmdName, ExistingKey, Chosen, DefaultValue: String): String;
+var
+  Cmd, Existing: String;
+begin
+  Cmd := Trim(GetCommandlineParam(CmdName));
+  if Cmd <> '' then
+    Result := Cmd
+  else if WizardSilent then
+  begin
+    Existing := ReadExistingIni(ExistingKey, '');
+    if Existing <> '' then
+      Result := Existing
+    else if Chosen <> '' then
+      Result := Chosen
+    else
+      Result := DefaultValue;
+  end
+  else if Chosen <> '' then
+    Result := Chosen
+  else
+    Result := DefaultValue;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Path, Cmd, Existing: String;
+  Path: String;
   ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
-    Cmd := Trim(GetCommandlineParam('HOTKEY'));
-    if Cmd <> '' then
-      ChosenHotkey := Cmd
-    else if WizardSilent then
-    begin
-      Existing := ReadExistingHotkey;
-      if Existing <> '' then
-        ChosenHotkey := Existing
-      else if ChosenHotkey = '' then
-        ChosenHotkey := DefaultHotkey;
-    end
-    else if ChosenHotkey = '' then
-      ChosenHotkey := DefaultHotkey;
+    ChosenHotkey := ResolveHotkey('HOTKEY', 'hotkey', ChosenHotkey, DefaultHotkey);
+    ChosenHotkeyAll := ResolveHotkey('HOTKEYALL', 'hotkey_all', ChosenHotkeyAll, DefaultHotkeyAll);
     Path := ExpandConstant('{app}\config.ini');
     SetIniString('TinyFix', 'hotkey', ChosenHotkey, Path);
-    Log('Wrote hotkey ' + ChosenHotkey + ' to ' + Path);
+    SetIniString('TinyFix', 'hotkey_all', ChosenHotkeyAll, Path);
+    Log('Wrote hotkey=' + ChosenHotkey + ' hotkey_all=' + ChosenHotkeyAll + ' to ' + Path);
     if HasCommandlineFlag('LAUNCH') then
     begin
       Log('Launching TinyFix after install');

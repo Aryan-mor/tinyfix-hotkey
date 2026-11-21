@@ -81,6 +81,10 @@ def fetch_latest_release(
     try:
         with open_url(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 429):
+            raise ConnectionError(f"GitHub rate limited ({exc.code}); will retry later") from exc
+        raise ConnectionError(f"Could not reach GitHub: {exc}") from exc
     except urllib.error.URLError as exc:
         raise ConnectionError(f"Could not reach GitHub: {exc}") from exc
     tag = str(payload.get("tag_name") or "").strip()

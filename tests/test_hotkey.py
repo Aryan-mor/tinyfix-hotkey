@@ -1,4 +1,17 @@
-from hotkey_util import DEFAULT_HOTKEY, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, parse_hotkey
+from pathlib import Path
+
+import pytest
+
+from hotkey_util import (
+    DEFAULT_HOTKEY,
+    DEFAULT_HOTKEY_ALL,
+    MOD_ALT,
+    MOD_CONTROL,
+    MOD_NOREPEAT,
+    disabled_hotkey,
+    is_disabled_spec,
+    parse_hotkey,
+)
 
 
 def test_default_hotkey_is_ctrl_alt_space():
@@ -8,6 +21,15 @@ def test_default_hotkey_is_ctrl_alt_space():
     assert hotkey.modifiers & MOD_CONTROL
     assert hotkey.modifiers & MOD_ALT
     assert hotkey.register_modifiers & MOD_NOREPEAT
+    assert hotkey.is_safe()
+    assert not hotkey.is_disabled
+
+
+def test_default_fix_all_hotkey_is_ctrl_f3():
+    hotkey = parse_hotkey(DEFAULT_HOTKEY_ALL)
+    assert hotkey.display == "Ctrl+F3"
+    assert hotkey.vk == 0x72
+    assert hotkey.modifiers & MOD_CONTROL
     assert hotkey.is_safe()
 
 
@@ -30,11 +52,25 @@ def test_canonicalizes_separators_and_case():
 
 
 def test_rejects_empty_and_double_keys():
-    import pytest
-
     with pytest.raises(ValueError):
         parse_hotkey("")
     with pytest.raises(ValueError):
         parse_hotkey("Ctrl+Alt")
     with pytest.raises(ValueError):
         parse_hotkey("Ctrl+A+B")
+
+
+@pytest.mark.parametrize("spec", ["none", "None", "disabled", "Disabled", "off", "no", "None/Disabled", "none / disabled"])
+def test_disabled_hotkey_specs(spec):
+    assert is_disabled_spec(spec)
+    hotkey = parse_hotkey(spec)
+    assert hotkey.is_disabled
+    assert hotkey.display == "None"
+    assert hotkey.is_safe()
+    assert hotkey == disabled_hotkey()
+
+
+def test_both_hotkeys_can_be_disabled():
+    selection = parse_hotkey("none")
+    fix_all = parse_hotkey("off")
+    assert selection.is_disabled and fix_all.is_disabled

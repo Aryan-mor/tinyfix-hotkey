@@ -37,6 +37,8 @@ VK_OEM_1 = 0xBA  # ;
 VK_OEM_7 = 0xDE  # '
 
 DEFAULT_HOTKEY = "Ctrl+Alt+Space"
+DEFAULT_HOTKEY_ALL = "Ctrl+F3"
+DISABLED_HOTKEY_NAMES = ("none", "disabled", "off", "no", "none/disabled")
 
 MODIFIER_NAMES: dict[str, int] = {
     "ctrl": MOD_CONTROL,
@@ -155,8 +157,12 @@ class Hotkey:
     def needs_modifier(self) -> bool:
         return not self.is_function_key
 
+    @property
+    def is_disabled(self) -> bool:
+        return self.vk == 0
+
     def is_safe(self) -> bool:
-        if self.is_function_key:
+        if self.is_disabled or self.is_function_key:
             return True
         return (self.modifiers & 0x0F) != 0
 
@@ -206,7 +212,20 @@ def format_hotkey(modifiers: int, vk: int) -> str:
     return "+".join(parts)
 
 
+def is_disabled_spec(spec: str | None) -> bool:
+    if spec is None:
+        return False
+    text = str(spec).strip().lower().replace(" ", "").replace("-", "/")
+    return text in DISABLED_HOTKEY_NAMES or text == "none/disabled"
+
+
+def disabled_hotkey() -> Hotkey:
+    return Hotkey(modifiers=0, vk=0, display="None")
+
+
 def parse_hotkey(spec: str) -> Hotkey:
+    if is_disabled_spec(spec):
+        return disabled_hotkey()
     if not spec or not str(spec).strip():
         raise ValueError("Hotkey is empty")
     text = str(spec).strip().replace("-", "+")

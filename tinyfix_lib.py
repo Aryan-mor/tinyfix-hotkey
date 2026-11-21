@@ -2,18 +2,39 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from engine.fixer import DEFAULT_WEIGHTS, WITH_MODEL_WEIGHTS, Fixer, FixerWeights, parse_word_list
+from engine.fixer import (
+    DEFAULT_WEIGHTS,
+    WITH_MODEL_WEIGHTS,
+    Correction,
+    Fixer,
+    FixerWeights,
+    parse_word_list,
+)
+from engine.rules import match_case
 from engine.trie import WordTrie
-from engine.wrong_word import CAREFUL_WRONG_WORD, EAGER_WRONG_WORD, OnnxModel, WrongWordChecker
+from engine.typo_cost import typo_cost
+from engine.wrong_word import (
+    CAREFUL_WRONG_WORD,
+    CANDIDATES,
+    EAGER_WRONG_WORD,
+    MAX_NEIGHBORS,
+    OnnxModel,
+    UNKNOWN,
+    WrongWordChecker,
+    WrongWordSettings,
+)
 
 MODEL_REVISION = "8efdf5cd91b32584f4077aa0e8ecaf48f7651bef"
 SPELLING_MIN_CONFIDENCE = 0.55
 CONTEXT_BEFORE = 600
 CONTEXT_AFTER = 200
+DEFAULT_SENSITIVITY = "cautious"
+SENSITIVITY_NAMES = ("cautious", "balanced", "aggressive")
 
 WORD = re.compile(r"[A-Za-z']+")
 FENCED_CODE = re.compile(r"```[\s\S]*?(?:```|$)", re.MULTILINE)
@@ -35,6 +56,71 @@ class Fix:
     @property
     def from_(self) -> int:
         return self.start
+
+
+@dataclass(frozen=True)
+class SensitivityPreset:
+    name: str
+    wrong_word: WrongWordSettings
+    weights: FixerWeights
+    known_word_swap: bool = False
+    known_word_max_cost: float = 1.5
+    known_word_min_margin: float = 6.0
+    known_word_min_value: float = 5.0
+    known_word_cost_weight: float = 1.5
+    known_word_max_length: int = 5
+
+
+# cautious = current production defaults (eager real-word checker + 0.55 spelling floor).
+SENSITIVITY_PRESETS: dict[str, SensitivityPreset] = {
+    "cautious": SensitivityPreset(
+        name="cautious",
+        wrong_word=EAGER_WRONG_WORD,
+        weights=FixerWeights(
+            frequency=WITH_MODEL_WEIGHTS.frequency,
+            context=WITH_MODEL_WEIGHTS.context,
+            keep_cost=WITH_MODEL_WEIGHTS.keep_cost,
+            min_confidence=SPELLING_MIN_CONFIDENCE,
+        ),
+    ),
+    "balanced": SensitivityPreset(
+        name="balanced",
+        wrong_word=WrongWordSettings(threshold=2.5, cost_weight=1.5),
+        weights=FixerWeights(
+            frequency=WITH_MODEL_WEIGHTS.frequency,
+            context=WITH_MODEL_WEIGHTS.context,
+            keep_cost=WITH_MODEL_WEIGHTS.keep_cost,
+            min_confidence=0.45,
+        ),
+    ),
+    "aggressive": SensitivityPreset(
+        name="aggressive",
+        wrong_word=WrongWordSettings(threshold=2.0, cost_weight=1.5),
+        weights=FixerWeights(
+            frequency=WITH_MODEL_WEIGHTS.frequency,
+            context=WITH_MODEL_WEIGHTS.context,
+            keep_cost=WITH_MODEL_WEIGHTS.keep_cost,
+            min_confidence=0.40,
+        ),
+        known_word_swap=True,
+        known_word_max_cost=1.5,
+        known_word_min_margin=6.0,
+        known_word_min_value=5.0,
+        known_word_cost_weight=1.5,
+        known_word_max_length=5,
+    ),
+}
+
+
+def normalize_sensitivity(name: str | None) -> str:
+    raw = (name or DEFAULT_SENSITIVITY).strip().lower()
+    if raw in SENSITIVITY_PRESETS:
+        return raw
+    return DEFAULT_SENSITIVITY
+
+
+def get_sensitivity_preset(name: str | None) -> SensitivityPreset:
+    return SENSITIVITY_PRESETS[normalize_sensitivity(name)]
 
 
 def _lines(text: str) -> list[str]:
@@ -71,11 +157,90 @@ def apply_fixes(text: str, fixes: list[Fix]) -> str:
     return result
 
 
+def plan_clipboard_fix(engine: "Tinyfix", text: str | None) -> tuple[str, str | None]:
+    """Decide how to fix clipboard text in place. Returns (notification, new_text_or_None)."""
+    if text is None or text == "":
+        return "Clipboard has no text", None
+    fixes = engine.check(text)
+    if not fixes:
+        return "No typos found in clipboard", None
+    corrected = apply_fixes(text, fixes)
+    count = len(fixes)
+    label = "change" if count == 1 else "changes"
+    return f"Clipboard fixed: {count} {label}", corrected
+
+
 class Tinyfix:
     def __init__(self, fixer: Fixer, wrong_word: WrongWordChecker | None, model: OnnxModel | None) -> None:
         self.fixer = fixer
         self.wrong_word = wrong_word
         self.model = model
+        self.sensitivity = DEFAULT_SENSITIVITY
+        self._preset = get_sensitivity_preset(DEFAULT_SENSITIVITY)
+
+    def apply_sensitivity(self, name: str | None) -> str:
+        """Update swap/confidence thresholds live without reloading the model."""
+        preset = get_sensitivity_preset(name)
+        self._preset = preset
+        self.sensitivity = preset.name
+        self.fixer.weights = preset.weights
+        if self.wrong_word is not None:
+            self.wrong_word.settings = preset.wrong_word
+        return self.sensitivity
+
+    def _known_word_swap(self, text_before: str, word: str, text_after: str) -> Correction | None:
+        preset = self._preset
+        if not preset.known_word_swap or self.wrong_word is None:
+            return None
+        if len(word) < 2 or len(word) > preset.known_word_max_length:
+            return None
+        if not self.fixer.is_known(word):
+            return None
+        # Only for words the context model cannot score as a typed token (e.g. "fro").
+        if self.wrong_word.ids.get(word.lower()) is not None:
+            return None
+        lower = word.lower()
+        options: list[tuple[str, float]] = []
+        seen: set[str] = set()
+        for match in self.fixer.trie.search(lower, 1):
+            entry = self.fixer.words[match.index]
+            if entry.word == lower or entry.word in seen:
+                continue
+            cost = typo_cost(lower, entry.word)
+            if cost > preset.known_word_max_cost:
+                continue
+            seen.add(entry.word)
+            options.append((entry.word, cost))
+            if len(options) >= MAX_NEIGHBORS:
+                break
+        if not options:
+            return None
+        typed_id = UNKNOWN
+        option_ids = [self.wrong_word.ids.get(option, UNKNOWN) for option, _cost in options]
+        margins: list[float] = []
+        for start in range(0, len(option_ids), MAX_NEIGHBORS):
+            chunk = option_ids[start : start + MAX_NEIGHBORS]
+            raw = self.wrong_word.run_model(text_before, text_after, [[typed_id, *chunk]])
+            typed_score = raw[0]
+            for index in range(len(chunk)):
+                margins.append(raw[index + 1] - typed_score)
+        best: tuple[float, str, float] | None = None
+        for (option, cost), margin in zip(options, margins):
+            value = margin - preset.known_word_cost_weight * cost
+            if margin < preset.known_word_min_margin or value < preset.known_word_min_value:
+                continue
+            if best is None or value > best[0]:
+                best = (value, option, margin)
+        if best is None:
+            return None
+        _value, option, margin = best
+        confidence = 1 / (1 + math.exp(-margin))
+        return Correction(
+            original=word,
+            replacement=match_case(word, option),
+            confidence=confidence,
+            used_context=True,
+        )
 
     def check(self, text: str, kinds: list[str] | None = None) -> list[Fix]:
         kinds = kinds or ["spelling", "context"]
@@ -99,6 +264,8 @@ class Tinyfix:
                 after_limit = len(text) if line_end == -1 else line_end
                 after = text[end : min(after_limit, end + CONTEXT_AFTER)]
                 correction = self.wrong_word.check(before, original, after)
+                if not correction:
+                    correction = self._known_word_swap(before, original, after)
             if not correction or correction.replacement == original:
                 continue
             fixes.append(
@@ -124,7 +291,7 @@ class Tinyfix:
         self.fixer.remember_undo(word)
 
 
-def load_tinyfix(model_dir: Path, mode: str = "balanced") -> Tinyfix:
+def load_tinyfix(model_dir: Path, mode: str = "balanced", sensitivity: str | None = None) -> Tinyfix:
     model_dir = Path(model_dir)
     words_text = (model_dir / "words.txt").read_text(encoding="utf-8")
     vocabulary = _lines((model_dir / "wrong-word-vocab.txt").read_text(encoding="utf-8"))
@@ -141,4 +308,18 @@ def load_tinyfix(model_dir: Path, mode: str = "balanced") -> Tinyfix:
         min_confidence=SPELLING_MIN_CONFIDENCE,
     )
     fixer = Fixer(words=word_list, trie=trie, scorer=wrong_word, weights=weights)
-    return Tinyfix(fixer, wrong_word, model)
+    engine = Tinyfix(fixer, wrong_word, model)
+    if sensitivity is not None:
+        engine.apply_sensitivity(sensitivity)
+    elif mode == "careful":
+        engine.sensitivity = "cautious"
+        engine._preset = get_sensitivity_preset("cautious")
+        # Keep the stricter careful wrong-word settings already applied above.
+        engine._preset = SensitivityPreset(
+            name="cautious",
+            wrong_word=CAREFUL_WRONG_WORD,
+            weights=engine.fixer.weights,
+        )
+    else:
+        engine.apply_sensitivity(DEFAULT_SENSITIVITY)
+    return engine
