@@ -5,6 +5,7 @@ import pytest
 from hotkey_util import (
     DEFAULT_HOTKEY,
     DEFAULT_HOTKEY_ALL,
+    DEFAULT_HOTKEY_TRANSLATE,
     MOD_ALT,
     MOD_CONTROL,
     MOD_NOREPEAT,
@@ -74,3 +75,13 @@ def test_both_hotkeys_can_be_disabled():
     selection = parse_hotkey("none")
     fix_all = parse_hotkey("off")
     assert selection.is_disabled and fix_all.is_disabled
+
+
+
+def test_default_translate_hotkey_is_ctrl_alt_t():
+    hotkey = parse_hotkey(DEFAULT_HOTKEY_TRANSLATE)
+    assert hotkey.display == "Ctrl+Alt+T"
+    assert hotkey.vk == ord("T")
+    assert hotkey.modifiers & MOD_CONTROL
+    assert hotkey.modifiers & MOD_ALT
+    assert hotkey.is_safe()

@@ -38,6 +38,7 @@ VK_OEM_7 = 0xDE  # '
 
 DEFAULT_HOTKEY = "Ctrl+Alt+Space"
 DEFAULT_HOTKEY_ALL = "Ctrl+F3"
+DEFAULT_HOTKEY_TRANSLATE = "Ctrl+Alt+T"
 DISABLED_HOTKEY_NAMES = ("none", "disabled", "off", "no", "none/disabled")
 
 MODIFIER_NAMES: dict[str, int] = {

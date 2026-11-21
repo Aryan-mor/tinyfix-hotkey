@@ -18,9 +18,14 @@ hiddenimports = [
     "tinyfix_lib",
     "hotkey_util",
     "update_check",
+    "prompts",
+    "secret_store",
+    "llm_client",
+    "settings_ui",
+    "sv_ttk",
 ]
 
-for pkg in ("onnxruntime", "pystray", "PIL"):
+for pkg in ("onnxruntime", "pystray", "PIL", "sv_ttk"):
     collected_datas, collected_binaries, collected_hidden = collect_all(pkg)
     datas += collected_datas
     binaries += collected_binaries

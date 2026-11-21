@@ -18,11 +18,16 @@ from pathlib import Path
 from hotkey_util import (
     DEFAULT_HOTKEY,
     DEFAULT_HOTKEY_ALL,
+    DEFAULT_HOTKEY_TRANSLATE,
     KEY_CHOICES,
     Hotkey,
     disabled_hotkey,
     parse_hotkey,
 )
+from llm_client import LLMConfig, LLMError, LLMTimeout, correct_with_fallback, translate_online
+from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
+from secret_store import default_secrets_path, load_api_key, save_api_key
+from settings_ui import SettingsData, SettingsHooks, open_settings
 from tinyfix_lib import DEFAULT_SENSITIVITY, SENSITIVITY_NAMES, normalize_sensitivity, plan_clipboard_fix
 from update_check import (
     LatestRelease,
@@ -37,11 +42,12 @@ from update_check import (
 )
 
 APP_NAME = "TinyFix"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 MUTEX_NAME = "Local\\TinyFixHotkey"
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
 HOTKEY_ALL_ID = 2
+HOTKEY_TRANSLATE_ID = 3
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
 WM_APP_RELOAD = 0x8001
@@ -106,6 +112,9 @@ os.environ.setdefault("PYTHONPYCACHEPREFIX", str(ROOT / "cache" / "pycache"))
 LOG_PATH = ROOT / "tinyfix.log"
 PID_PATH = ROOT / "tinyfix.pid"
 CONFIG_PATH = ROOT / "config.ini"
+SECRETS_PATH = default_secrets_path(ROOT)
+PROMPT_FIX_PATH = ROOT / "prompt_fix.txt"
+PROMPT_TRANSLATE_PATH = ROOT / "prompt_translate.txt"
 MODELS = RESOURCES / "models"
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -239,7 +248,10 @@ hotkey_ready = threading.Event()
 hotkey_failed = threading.Event()
 current_hotkey = parse_hotkey(DEFAULT_HOTKEY)
 current_hotkey_all = parse_hotkey(DEFAULT_HOTKEY_ALL)
+current_hotkey_translate = parse_hotkey(DEFAULT_HOTKEY_TRANSLATE)
+translate_select_all = False
 current_sensitivity = DEFAULT_SENSITIVITY
+llm_config = LLMConfig()
 failed_hotkey_ids: set[int] = set()
 tray_icon = None
 ui_lock = threading.Lock()
@@ -300,38 +312,110 @@ def _write_parser(parser: configparser.ConfigParser) -> None:
         parser.write(handle)
 
 
+def _read_prompt_file(path: Path, default: str) -> str:
+    try:
+        if path.exists():
+            text = path.read_text(encoding="utf-8")
+            if text.strip():
+                return text
+    except Exception:
+        logging.exception("Could not read %s", path)
+    return default
+
+
+def _write_prompt_file(path: Path, text: str) -> None:
+    path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+
+
+def _parse_bool(raw: str, default: bool = False) -> bool:
+    text = (raw or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def load_settings() -> None:
-    global current_hotkey, current_hotkey_all, current_sensitivity
+    global current_hotkey, current_hotkey_all, current_hotkey_translate
+    global current_sensitivity, translate_select_all, llm_config
     current_hotkey = parse_hotkey(DEFAULT_HOTKEY)
     current_hotkey_all = parse_hotkey(DEFAULT_HOTKEY_ALL)
+    current_hotkey_translate = parse_hotkey(DEFAULT_HOTKEY_TRANSLATE)
+    translate_select_all = False
     current_sensitivity = DEFAULT_SENSITIVITY
-    if not CONFIG_PATH.exists():
-        return
-    parser = _load_parser()
-    try:
-        current_hotkey = parse_hotkey(parser.get(CONFIG_SECTION, "hotkey", fallback=DEFAULT_HOTKEY))
-    except Exception:
-        logging.exception("Could not read fix-selection shortcut; using default %s", DEFAULT_HOTKEY)
-        current_hotkey = parse_hotkey(DEFAULT_HOTKEY)
-    try:
-        current_hotkey_all = parse_hotkey(
-            parser.get(CONFIG_SECTION, "hotkey_all", fallback=DEFAULT_HOTKEY_ALL)
+    llm_config = LLMConfig()
+    parser = _load_parser() if CONFIG_PATH.exists() else None
+    if parser is not None:
+        try:
+            current_hotkey = parse_hotkey(parser.get(CONFIG_SECTION, "hotkey", fallback=DEFAULT_HOTKEY))
+        except Exception:
+            logging.exception("Could not read fix-selection shortcut; using default %s", DEFAULT_HOTKEY)
+            current_hotkey = parse_hotkey(DEFAULT_HOTKEY)
+        try:
+            current_hotkey_all = parse_hotkey(
+                parser.get(CONFIG_SECTION, "hotkey_all", fallback=DEFAULT_HOTKEY_ALL)
+            )
+        except Exception:
+            logging.exception("Could not read fix-all shortcut; using default %s", DEFAULT_HOTKEY_ALL)
+            current_hotkey_all = parse_hotkey(DEFAULT_HOTKEY_ALL)
+        try:
+            current_hotkey_translate = parse_hotkey(
+                parser.get(CONFIG_SECTION, "hotkey_translate", fallback=DEFAULT_HOTKEY_TRANSLATE)
+            )
+        except Exception:
+            logging.exception("Could not read translate shortcut; using default %s", DEFAULT_HOTKEY_TRANSLATE)
+            current_hotkey_translate = parse_hotkey(DEFAULT_HOTKEY_TRANSLATE)
+        current_sensitivity = normalize_sensitivity(
+            parser.get(CONFIG_SECTION, "sensitivity", fallback=DEFAULT_SENSITIVITY)
         )
-    except Exception:
-        logging.exception("Could not read fix-all shortcut; using default %s", DEFAULT_HOTKEY_ALL)
-        current_hotkey_all = parse_hotkey(DEFAULT_HOTKEY_ALL)
-    current_sensitivity = normalize_sensitivity(
-        parser.get(CONFIG_SECTION, "sensitivity", fallback=DEFAULT_SENSITIVITY)
-    )
+        translate_select_all = _parse_bool(parser.get(CONFIG_SECTION, "translate_select_all", fallback="false"))
+        try:
+            timeout = float(parser.get(CONFIG_SECTION, "llm_timeout", fallback=str(2)))
+        except ValueError:
+            timeout = 2.0
+        llm_config = LLMConfig(
+            provider=parser.get(CONFIG_SECTION, "llm_provider", fallback="google") or "google",
+            api_key=load_api_key(SECRETS_PATH),
+            model=parser.get(CONFIG_SECTION, "llm_model", fallback="gemini-2.0-flash"),
+            base_url=parser.get(CONFIG_SECTION, "llm_base_url", fallback=""),
+            timeout=max(1.0, min(30.0, timeout)),
+            enabled=_parse_bool(parser.get(CONFIG_SECTION, "llm_enabled", fallback="false")),
+            fix_prompt=_read_prompt_file(PROMPT_FIX_PATH, DEFAULT_FIX_PROMPT),
+            translate_prompt=_read_prompt_file(PROMPT_TRANSLATE_PATH, DEFAULT_TRANSLATE_PROMPT),
+            target_language=parser.get(CONFIG_SECTION, "llm_target_language", fallback=DEFAULT_TARGET_LANGUAGE)
+            or DEFAULT_TARGET_LANGUAGE,
+        )
+    else:
+        llm_config.api_key = load_api_key(SECRETS_PATH)
+        llm_config.fix_prompt = _read_prompt_file(PROMPT_FIX_PATH, DEFAULT_FIX_PROMPT)
+        llm_config.translate_prompt = _read_prompt_file(PROMPT_TRANSLATE_PATH, DEFAULT_TRANSLATE_PROMPT)
 
 
-def save_settings(persist_hotkeys: bool = True, persist_sensitivity: bool = True) -> None:
+def save_settings(
+    persist_hotkeys: bool = True,
+    persist_sensitivity: bool = True,
+    persist_llm: bool = False,
+) -> None:
     parser = _load_parser()
     if persist_hotkeys:
         parser[CONFIG_SECTION]["hotkey"] = config_hotkey_value(current_hotkey)
         parser[CONFIG_SECTION]["hotkey_all"] = config_hotkey_value(current_hotkey_all)
+        parser[CONFIG_SECTION]["hotkey_translate"] = config_hotkey_value(current_hotkey_translate)
+        parser[CONFIG_SECTION]["translate_select_all"] = "true" if translate_select_all else "false"
     if persist_sensitivity:
         parser[CONFIG_SECTION]["sensitivity"] = current_sensitivity
+    if persist_llm:
+        parser[CONFIG_SECTION]["llm_provider"] = llm_config.provider
+        parser[CONFIG_SECTION]["llm_model"] = llm_config.model
+        parser[CONFIG_SECTION]["llm_base_url"] = llm_config.base_url
+        parser[CONFIG_SECTION]["llm_timeout"] = str(llm_config.timeout)
+        parser[CONFIG_SECTION]["llm_enabled"] = "true" if llm_config.enabled else "false"
+        parser[CONFIG_SECTION]["llm_target_language"] = llm_config.target_language
+        # Never write the API key to config.ini.
+        save_api_key(SECRETS_PATH, llm_config.api_key)
+        _write_prompt_file(PROMPT_FIX_PATH, llm_config.fix_prompt or DEFAULT_FIX_PROMPT)
+        _write_prompt_file(PROMPT_TRANSLATE_PATH, llm_config.translate_prompt or DEFAULT_TRANSLATE_PROMPT)
     _write_parser(parser)
 
 
@@ -576,11 +660,12 @@ def on_hotkey(select_all: bool = False) -> None:
                 notify("TinyFix", "Could not read the clipboard")
             return
         try:
-            corrected = engine.fix(selected)
+            corrected, source = correct_with_fallback(selected, engine, llm_config)
         except Exception:
             logging.exception("Correction failed")
             restore_clipboard(saved)
             return
+        logging.info("Correction source: %s (length=%s)", source, len(selected))
         if corrected == selected:
             restore_clipboard(saved)
             logging.info("Hotkey early return: no typos found (length=%s, %s)", len(selected), source)
@@ -594,6 +679,64 @@ def on_hotkey(select_all: bool = False) -> None:
         time.sleep(0.12)
         restore_clipboard(saved)
         logging.info("Corrected %s character(s) (%s)", len(selected), source)
+    finally:
+        busy.release()
+
+
+def on_translate_hotkey() -> None:
+    source = "translate"
+    if paused.is_set():
+        logging.info("Hotkey ignored: paused (%s)", source)
+        return
+    if not llm_config or not llm_config.ready:
+        logging.info("Hotkey ignored: online model is not enabled (%s)", source)
+        notify("TinyFix", "Turn on an online model in Settings to translate")
+        return
+    if not busy.acquire(blocking=False):
+        logging.info("Hotkey ignored: busy (%s)", source)
+        return
+    try:
+        if foreground_is_unequally_elevated():
+            logging.info("Hotkey ignored: target window is elevated (%s)", source)
+            notify("TinyFix", "Can't reach an elevated window")
+            return
+        selected, saved, reason = copy_selection(select_all=translate_select_all)
+        if reason != "ok":
+            length = 0 if selected is None else len(selected)
+            logging.info("Hotkey early return: %s (length=%s, %s)", reason, length, source)
+            if reason in ("copy_failed", "empty_selection"):
+                notify("TinyFix", "Nothing selected / could not copy the selection")
+            return
+        try:
+            translated = translate_online(llm_config, selected)
+        except (LLMTimeout, LLMError) as exc:
+            logging.info("Translation failed; leaving the text unchanged: %s", exc)
+            restore_clipboard(saved)
+            notify("TinyFix", "Translation failed; the text was left unchanged")
+            return
+        except Exception:
+            logging.exception("Translation failed")
+            restore_clipboard(saved)
+            notify("TinyFix", "Translation failed; the text was left unchanged")
+            return
+        if not translated:
+            restore_clipboard(saved)
+            logging.info("Hotkey early return: empty translation (length=%s, %s)", len(selected), source)
+            notify("TinyFix", "Translation failed; the text was left unchanged")
+            return
+        if translated == selected:
+            restore_clipboard(saved)
+            logging.info("Hotkey early return: translation unchanged (length=%s, %s)", len(selected), source)
+            notify("TinyFix", "Already in the target language")
+            return
+        if not write_unicode_text(translated):
+            restore_clipboard(saved)
+            logging.info("Hotkey early return: clipboard write failed (length=%s, %s)", len(selected), source)
+            return
+        send_ctrl_key(VK_V)
+        time.sleep(0.12)
+        restore_clipboard(saved)
+        logging.info("Translated %s character(s) (%s)", len(selected), source)
     finally:
         busy.release()
 
@@ -621,12 +764,23 @@ def register_current_hotkeys() -> bool:
     failed_hotkey_ids.clear()
     ok_sel = _register_one(current_hotkey, HOTKEY_ID, "Fix-selection")
     ok_all = _register_one(current_hotkey_all, HOTKEY_ALL_ID, "Fix-all")
-    return ok_sel and ok_all
+    if llm_config.ready and not current_hotkey_translate.is_disabled:
+        ok_tr = _register_one(current_hotkey_translate, HOTKEY_TRANSLATE_ID, "Translate")
+    else:
+        user32.UnregisterHotKey(None, HOTKEY_TRANSLATE_ID)
+        failed_hotkey_ids.discard(HOTKEY_TRANSLATE_ID)
+        if current_hotkey_translate.is_disabled:
+            logging.info("Translate shortcut is disabled")
+        else:
+            logging.info("Translate shortcut is idle until an online model is enabled")
+        ok_tr = True
+    return ok_sel and ok_all and ok_tr
 
 
 def unregister_current_hotkeys() -> None:
     user32.UnregisterHotKey(None, HOTKEY_ID)
     user32.UnregisterHotKey(None, HOTKEY_ALL_ID)
+    user32.UnregisterHotKey(None, HOTKEY_TRANSLATE_ID)
 
 
 def post_to_hotkey_thread(message: int) -> None:
@@ -676,6 +830,8 @@ def hotkey_loop() -> None:
                     on_hotkey(select_all=False)
                 elif msg.wParam == HOTKEY_ALL_ID:
                     on_hotkey(select_all=True)
+                elif msg.wParam == HOTKEY_TRANSLATE_ID:
+                    on_translate_hotkey()
                 else:
                     logging.info("Hotkey ignored: unknown id %s", int(msg.wParam))
             except Exception:
@@ -736,7 +892,8 @@ def status_text(_item=None) -> str:
         return f"Paused ({sel} / {all_})"
     if failed_hotkey_ids:
         return f"Shortcut unavailable ({sel} / {all_})"
-    return f"Running ({sel} / {all_})"
+    extra = " · AI on" if llm_config.ready else ""
+    return f"Running ({sel} / {all_}){extra}"
 
 
 def pause_label(_item=None) -> str:
@@ -750,10 +907,17 @@ def toggle_pause(_item=None, _icon=None) -> None:
         post_to_hotkey_thread(WM_APP_PAUSE)
 
 
-def apply_hotkeys(selection: Hotkey, fix_all: Hotkey, persist: bool = True) -> None:
-    global current_hotkey, current_hotkey_all
+def apply_hotkeys(
+    selection: Hotkey,
+    fix_all: Hotkey,
+    translate: Hotkey | None = None,
+    persist: bool = True,
+) -> None:
+    global current_hotkey, current_hotkey_all, current_hotkey_translate
     current_hotkey = selection
     current_hotkey_all = fix_all
+    if translate is not None:
+        current_hotkey_translate = translate
     if persist:
         try:
             save_settings(persist_hotkeys=True, persist_sensitivity=False)
@@ -915,7 +1079,52 @@ def show_hotkey_dialog(reason: str | None = None) -> None:
 
 
 def change_shortcut(_item=None, _icon=None) -> None:
-    show_hotkey_dialog()
+    open_settings_window()
+
+
+def _last_update_check_value() -> str:
+    parser = _load_parser()
+    return parser.get(CONFIG_SECTION, "last_update_check", fallback="").strip()
+
+
+def apply_settings_data(data: SettingsData) -> None:
+    global translate_select_all, llm_config
+    current_sensitivity_before = current_sensitivity
+    apply_sensitivity_setting(data.sensitivity, persist=True)
+    translate_select_all = data.translate_select_all
+    llm_config = data.llm
+    apply_hotkeys(data.hotkey, data.hotkey_all, data.hotkey_translate, persist=True)
+    try:
+        save_settings(persist_hotkeys=True, persist_sensitivity=True, persist_llm=True)
+    except Exception:
+        logging.exception("Could not save settings")
+    if current_sensitivity_before != current_sensitivity:
+        pass
+    logging.info(
+        "Settings saved (online=%s, provider=%s, sensitivity=%s)",
+        llm_config.ready,
+        llm_config.provider,
+        current_sensitivity,
+    )
+
+
+def open_settings_window(_item=None, _icon=None) -> None:
+    data = SettingsData(
+        version=APP_VERSION,
+        hotkey=current_hotkey,
+        hotkey_all=current_hotkey_all,
+        hotkey_translate=current_hotkey_translate,
+        translate_select_all=translate_select_all,
+        sensitivity=current_sensitivity,
+        llm=llm_config,
+        last_update_check=_last_update_check_value(),
+    )
+    hooks = SettingsHooks(
+        on_apply=apply_settings_data,
+        on_check_updates=lambda: check_for_updates_menu(),
+        on_live_sensitivity=lambda name: apply_sensitivity_setting(name, persist=True),
+    )
+    open_settings(data, hooks)
 
 
 def failed_shortcut_reason() -> str:
@@ -1021,7 +1230,30 @@ def on_fix_clipboard(_item=None, _icon=None) -> None:
             logging.info("Clipboard fix ignored: engine not ready")
             return
         text = read_unicode_text()
-        message, corrected = plan_clipboard_fix(engine, text)
+        if llm_config.ready and text:
+            try:
+                corrected, source = correct_with_fallback(text, engine, llm_config)
+            except Exception:
+                logging.exception("Clipboard fix failed")
+                notify("TinyFix", "Could not correct the clipboard")
+                return
+            if corrected == text:
+                message, corrected = "No typos found in clipboard", None
+            else:
+                # Keep the notification consistent with the offline path; count via the engine when possible.
+                try:
+                    count = len(engine.check(text)) if source != "online" else max(1, sum(1 for a, b in zip(text, corrected) if a != b) + abs(len(text) - len(corrected)))
+                except Exception:
+                    count = 1
+                if source == "online":
+                    message, corrected_out = "Clipboard fixed with the online model", corrected
+                    corrected = corrected_out
+                else:
+                    label = "change" if count == 1 else "changes"
+                    message, corrected = f"Clipboard fixed: {count} {label}", corrected
+                logging.info("Clipboard correction source: %s", source)
+        else:
+            message, corrected = plan_clipboard_fix(engine, text)
         if corrected is not None:
             if not write_unicode_text(corrected):
                 logging.info("Clipboard fix early return: clipboard write failed (length=%s)", 0 if text is None else len(text))
@@ -1046,7 +1278,7 @@ def drain_ui_actions() -> None:
         if action == "change-failed":
             reason = failed_shortcut_reason()
             notify("TinyFix", reason)
-            show_hotkey_dialog(reason=reason)
+            open_settings_window()
         elif action == "update-available" and isinstance(payload, LatestRelease):
             prompt_update(payload)
 
@@ -1096,6 +1328,7 @@ def setup_tray() -> None:
         pystray.MenuItem("Fix clipboard", on_fix_clipboard, default=True),
         pystray.MenuItem(status_text, None, enabled=False),
         pystray.MenuItem(pause_label, toggle_pause),
+        pystray.MenuItem("Settings…", open_settings_window),
         pystray.MenuItem("Change shortcut…", change_shortcut),
         pystray.MenuItem("Sensitivity", pystray.Menu(*[_sensitivity_item(name) for name in SENSITIVITY_NAMES])),
         pystray.MenuItem("Check for updates", check_for_updates_menu),

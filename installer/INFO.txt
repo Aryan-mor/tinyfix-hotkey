@@ -2,20 +2,26 @@ TinyFix Hotkey
 
 Select English text in any Windows app, then press your shortcut
 (default: Ctrl+Alt+Space) to correct spelling and real-word mix-ups
-such as form/from, their/there, and to/too.
+such as form/from, their/there, and to/too. Ctrl+F3 fixes the whole
+field. Left-click the tray icon to correct text already on the clipboard.
 
 The correction model is paperweight/tinyfix by Chris Ahlgren
 (https://huggingface.co/paperweight/tinyfix). It is bundled with this
 installer and runs fully offline after setup. TinyFix Hotkey is not
 affiliated with the model author.
 
+An optional online model (Google Gemini or any OpenAI-compatible API)
+can be turned on later in Settings. It is off by default.
+
 Limitations
-- English only. Other languages, including Persian, are left unchanged.
-- The shortcut will not reach windows that are running as Administrator
+- The built-in engine is English only. Other languages, including
+  Persian, are left unchanged unless you enable online translation.
+- Shortcuts will not reach windows that are running as Administrator
   unless TinyFix itself is also elevated.
-- The tool still misses some errors; it would rather leave a word alone
-  than change one you meant.
+- The built-in engine still misses some errors; Cautious would rather
+  leave a word alone than change one you meant.
 
 Privacy
-After installation, TinyFix works entirely on this computer. It does not
-send your text or clipboard to a server.
+After installation, TinyFix works entirely on this computer unless you
+enable an online model. API keys are stored with Windows DPAPI, not in
+plain config files, and are never written to the log.

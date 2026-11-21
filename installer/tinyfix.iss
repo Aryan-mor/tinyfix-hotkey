@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.1.1"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -27,6 +27,10 @@ UninstallDisplayName={#MyAppName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+WizardSizePercent=120
+WizardImageFile=..\assets\wizard.bmp
+WizardSmallImageFile=..\assets\wizard-small.bmp
+SetupLogging=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -57,11 +61,15 @@ Type: filesandordirs; Name: "{app}\cache"
 Type: files; Name: "{app}\tinyfix.log"
 Type: files; Name: "{app}\tinyfix.pid"
 Type: files; Name: "{app}\config.ini"
+Type: files; Name: "{app}\secrets.dpapi"
+Type: files; Name: "{app}\prompt_fix.txt"
+Type: files; Name: "{app}\prompt_translate.txt"
 
 [Code]
 const
   DefaultHotkey = 'Ctrl+Alt+Space';
   DefaultHotkeyAll = 'Ctrl+F3';
+  DefaultHotkeyTranslate = 'Ctrl+Alt+T';
   DisabledHotkey = 'none';
   DisabledKeyLabel = 'None/Disabled';
 
@@ -263,7 +271,7 @@ begin
      (not AllCtrl.Checked) and (not AllAlt.Checked) and (not AllShift.Checked) and (not AllWin.Checked) then
     HintLabel.Caption := 'Please add a modifier (Ctrl, Alt, Shift, or Win) for the Fix all key.'
   else
-    HintLabel.Caption := 'Fix selection corrects the highlighted text. Fix all selects the whole field first. Either shortcut can be disabled. Left-click the tray icon to fix the clipboard.';
+    HintLabel.Caption := 'Fix selection corrects the highlighted text. Fix all selects the whole field first. Either shortcut can be disabled. After setup, open Settings in the tray for sensitivity, a Translate shortcut (Ctrl+Alt+T), and optional online AI.';
 end;
 
 procedure ApplyHotkeyToControls(const Spec: String; ChkCtrl, ChkAlt, ChkShift, ChkWin: TNewCheckBox; Combo: TNewComboBox);
@@ -425,7 +433,7 @@ begin
   HintLabel.WordWrap := True;
   HintLabel.Width := HotkeyPage.SurfaceWidth;
   HintLabel.Height := ScaleY(52);
-  HintLabel.Caption := 'Fix selection corrects the highlighted text. Fix all selects the whole field first. Either shortcut can be disabled. Left-click the tray icon to fix the clipboard.';
+  HintLabel.Caption := 'Fix selection corrects the highlighted text. Fix all selects the whole field first. Either shortcut can be disabled. After setup, open Settings in the tray for sensitivity, a Translate shortcut (Ctrl+Alt+T), and optional online AI.';
 
   ApplyHotkeyToControls(ChosenHotkey, SelCtrl, SelAlt, SelShift, SelWin, SelKey);
   ApplyHotkeyToControls(ChosenHotkeyAll, AllCtrl, AllAlt, AllShift, AllWin, AllKey);
@@ -524,6 +532,7 @@ begin
     Path := ExpandConstant('{app}\config.ini');
     SetIniString('TinyFix', 'hotkey', ChosenHotkey, Path);
     SetIniString('TinyFix', 'hotkey_all', ChosenHotkeyAll, Path);
+    SetIniString('TinyFix', 'hotkey_translate', ResolveHotkey('HOTKEYTRANSLATE', 'hotkey_translate', '', DefaultHotkeyTranslate), Path);
     Log('Wrote hotkey=' + ChosenHotkey + ' hotkey_all=' + ChosenHotkeyAll + ' to ' + Path);
     if HasCommandlineFlag('LAUNCH') then
     begin

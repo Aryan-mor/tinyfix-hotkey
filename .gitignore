@@ -24,3 +24,8 @@ config.ini
 demo/node_modules/
 demo/out/
 demo/.cache/
+
+# Local secrets and custom prompts (never commit)
+secrets.dpapi
+prompt_fix.txt
+prompt_translate.txt
