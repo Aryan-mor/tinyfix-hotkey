@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -85,6 +85,31 @@ begin
     if CompareText(Copy(S, 1, PrefixLen), Prefix) = 0 then
     begin
       Result := Copy(S, PrefixLen + 1, MaxInt);
+      Exit;
+    end;
+  end;
+end;
+
+function HasCommandlineFlag(const Name: String): Boolean;
+var
+  I: Integer;
+  S, Prefix: String;
+  Value: String;
+begin
+  Result := False;
+  Prefix := '/' + Name + '=';
+  for I := 1 to ParamCount do
+  begin
+    S := ParamStr(I);
+    if (CompareText(S, '/' + Name) = 0) or (CompareText(S, '-' + Name) = 0) then
+    begin
+      Result := True;
+      Exit;
+    end;
+    if CompareText(Copy(S, 1, Length(Prefix)), Prefix) = 0 then
+    begin
+      Value := LowerCase(Copy(S, Length(Prefix) + 1, MaxInt));
+      Result := (Value <> '0') and (Value <> 'no') and (Value <> 'false');
       Exit;
     end;
   end;
@@ -384,6 +409,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Path, Cmd, Existing: String;
+  ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -403,6 +429,11 @@ begin
     Path := ExpandConstant('{app}\config.ini');
     SetIniString('TinyFix', 'hotkey', ChosenHotkey, Path);
     Log('Wrote hotkey ' + ChosenHotkey + ' to ' + Path);
+    if HasCommandlineFlag('LAUNCH') then
+    begin
+      Log('Launching TinyFix after install');
+      Exec(ExpandConstant('{app}\{#MyAppExeName}'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, ResultCode);
+    end;
   end;
 end;
 

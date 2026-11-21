@@ -17,6 +17,7 @@ hiddenimports = [
     "engine.wrong_word",
     "tinyfix_lib",
     "hotkey_util",
+    "update_check",
 ]
 
 for pkg in ("onnxruntime", "pystray", "PIL"):

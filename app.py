@@ -16,9 +16,20 @@ from ctypes import wintypes
 from pathlib import Path
 
 from hotkey_util import DEFAULT_HOTKEY, KEY_CHOICES, Hotkey, parse_hotkey
+from update_check import (
+    LatestRelease,
+    check_for_update,
+    default_setup_download_path,
+    download_file,
+    fetch_latest_release,
+    is_newer,
+    mark_checked,
+    should_auto_check,
+    start_silent_update,
+)
 
 APP_NAME = "TinyFix"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 MUTEX_NAME = "Local\\TinyFixHotkey"
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
@@ -182,7 +193,7 @@ hotkey_failed = threading.Event()
 current_hotkey = parse_hotkey(DEFAULT_HOTKEY)
 tray_icon = None
 ui_lock = threading.Lock()
-pending_ui: list[str] = []
+pending_ui: list[tuple[str, object]] = []
 
 
 def setup_logging() -> None:
@@ -435,9 +446,9 @@ def post_to_hotkey_thread(message: int) -> None:
         user32.PostThreadMessageW(hotkey_thread_id, message, 0, 0)
 
 
-def queue_ui(action: str) -> None:
+def queue_ui(action: str, payload: object = None) -> None:
     with ui_lock:
-        pending_ui.append(action)
+        pending_ui.append((action, payload))
     if tray_icon is not None:
         try:
             tray_icon.update_menu()
@@ -654,11 +665,77 @@ def change_shortcut(_item=None, _icon=None) -> None:
     show_hotkey_dialog()
 
 
+def prompt_update(latest: LatestRelease) -> None:
+    import tkinter as tk
+    from tkinter import messagebox
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.attributes("-topmost", True)
+    except tk.TclError:
+        pass
+    answer = messagebox.askyesno(
+        "TinyFix",
+        f"TinyFix v{latest.version} is available. Update now?",
+        parent=root,
+    )
+    root.destroy()
+    if not answer:
+        return
+    try:
+        dest = default_setup_download_path()
+        logging.info("Downloading %s to %s", latest.setup_url, dest)
+        download_file(latest.setup_url, dest)
+        start_silent_update(dest)
+        logging.info("Started silent update; exiting so files can be replaced")
+        request_stop()
+    except Exception:
+        logging.exception("Could not apply the TinyFix update")
+
+
+def auto_update_check_worker() -> None:
+    try:
+        if not should_auto_check(CONFIG_PATH):
+            logging.info("Skipping automatic update check (already checked today)")
+            return
+        available, latest, error = check_for_update(APP_VERSION)
+        if error:
+            logging.info("Update check skipped: %s", error)
+            return
+        mark_checked(CONFIG_PATH)
+        if available and latest is not None:
+            queue_ui("update-available", latest)
+    except Exception:
+        logging.info("Update check skipped", exc_info=True)
+
+
+def manual_update_check_worker() -> None:
+    try:
+        available, latest, error = check_for_update(APP_VERSION)
+        if error:
+            logging.info("Update check skipped: %s", error)
+            return
+        mark_checked(CONFIG_PATH)
+        if available and latest is not None:
+            queue_ui("update-available", latest)
+        else:
+            notify("TinyFix", f"You already have the latest version (v{APP_VERSION}).")
+            logging.info("No update available (current v%s)", APP_VERSION)
+    except Exception:
+        logging.info("Update check skipped", exc_info=True)
+
+
+def check_for_updates_menu(_item=None, _icon=None) -> None:
+    threading.Thread(target=manual_update_check_worker, name="tinyfix-update-manual", daemon=True).start()
+
+
 def drain_ui_actions() -> None:
     with ui_lock:
         actions = list(pending_ui)
         pending_ui.clear()
-    for action in actions:
+    for item in actions:
+        action, payload = item if isinstance(item, tuple) else (item, None)
         if action == "change-failed":
             notify(
                 "TinyFix",
@@ -667,6 +744,8 @@ def drain_ui_actions() -> None:
             show_hotkey_dialog(
                 reason=f"{current_hotkey.display} is already in use by another program."
             )
+        elif action == "update-available" and isinstance(payload, LatestRelease):
+            prompt_update(payload)
 
 
 def make_icon():
@@ -696,6 +775,7 @@ def setup_tray() -> None:
         pystray.MenuItem(status_text, None, enabled=False),
         pystray.MenuItem(pause_label, toggle_pause),
         pystray.MenuItem("Change shortcut…", change_shortcut),
+        pystray.MenuItem("Check for updates", check_for_updates_menu),
         pystray.MenuItem("Exit", lambda *_: request_stop()),
     )
     tray_icon = pystray.Icon(
@@ -712,6 +792,7 @@ def setup_tray() -> None:
     def setup(icon: pystray.Icon) -> None:
         icon.visible = True
         drain_ui_actions()
+        threading.Thread(target=auto_update_check_worker, name="tinyfix-update", daemon=True).start()
 
     tray_icon.run(setup=setup)
 
@@ -765,14 +846,67 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="TinyFix Hotkey — correct selected English text.")
     parser.add_argument("--fix", action="store_true", help="Correct text and print it, then exit")
     parser.add_argument("--input", "-i", help="Read text to correct from this file")
-    parser.add_argument("--output", "-o", help="Write --fix output to this file (useful for the windowed exe)")
+    parser.add_argument("--output", "-o", help="Write --fix / --check-update output to this file (useful for the windowed exe)")
     parser.add_argument("text", nargs="*", help="Text to correct when using --fix (joined if split)")
+    parser.add_argument("--check-update", action="store_true", help="Check GitHub for a newer TinyFix release and exit")
+    parser.add_argument("--apply-update", action="store_true", help="With --check-update, download and silently install an update")
+    parser.add_argument("--assume-version", help="Pretend the current app version is this value (for tests)")
     parser.add_argument("--version", action="version", version=f"TinyFix {APP_VERSION}")
     return parser.parse_args(argv)
 
 
+def run_check_update_cli(assume_version: str | None, apply: bool, output_path: str | None) -> int:
+    import json
+
+    _attach_console()
+    setup_logging()
+    current = assume_version or APP_VERSION
+    available, latest, error = check_for_update(current)
+    result = {
+        "ok": error is None,
+        "current": current,
+        "latest": latest.version if latest else None,
+        "tag": latest.tag if latest else None,
+        "update_available": bool(available),
+        "setup_url": latest.setup_url if latest else None,
+        "error": error,
+        "applied": False,
+    }
+    code = 0
+    if error:
+        logging.info("Update check skipped: %s", error)
+        code = 2
+    elif available and latest is not None:
+        code = 1
+        if apply:
+            try:
+                dest = default_setup_download_path()
+                download_file(latest.setup_url, dest)
+                start_silent_update(dest)
+                result["applied"] = True
+                result["setup_path"] = str(dest)
+                logging.info("Started silent update from %s", dest)
+                code = 0
+            except Exception as exc:
+                logging.exception("Could not apply the TinyFix update")
+                result["ok"] = False
+                result["error"] = str(exc)
+                code = 2
+    payload = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    try:
+        sys.stdout.write(payload)
+        sys.stdout.flush()
+    except Exception:
+        logging.exception("Could not write update-check result to stdout")
+    if output_path:
+        Path(output_path).write_text(payload, encoding="utf-8")
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.check_update:
+        return run_check_update_cli(args.assume_version, args.apply_update, args.output)
     if args.fix:
         if args.input:
             payload = Path(args.input).read_text(encoding="utf-8")

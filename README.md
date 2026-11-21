@@ -39,6 +39,11 @@ The setup wizard remembers your existing shortcut on upgrade. Silent installs ke
 TinyFix-Setup.exe /VERYSILENT /HOTKEY=Ctrl+Shift+F12
 ```
 
+
+## Updates
+
+TinyFix checks GitHub for a new release at most once a day when it starts, and whenever you choose **Check for updates** in the tray menu. If a newer version is available it asks: “TinyFix vX.Y.Z is available. Update now?” Choosing Yes downloads `TinyFix-Setup.exe` and runs a silent upgrade that keeps your install folder, startup choice, and shortcut, then relaunches the app. If the computer is offline, the check is only logged.
+
 ## Uninstall
 
 Open **Settings → Apps → Installed apps**, find **TinyFix Hotkey**, and uninstall. The uninstaller stops the app first. You can also use the Start Menu shortcut or `unins000.exe` in the install folder.
@@ -56,7 +61,7 @@ After installation, TinyFix works entirely offline on your computer. It does not
 
 ## Credits
 
-The correction model is [paperweight/tinyfix](https://huggingface.co/paperweight/tinyfix) by Chris Ahlgren. TinyFix Hotkey bundles that model and a Python port of its engine; it is not affiliated with the model author. The model files are fetched at build time (pinned Hugging Face revision `8efdf5cd91b32584f4077aa0e8ecaf48f7651bef`) and shipped inside the installer.
+The correction model is [paperweight/tinyfix](https://huggingface.co/paperweight/tinyfix) by Chris Ahlgren. TinyFix Hotkey bundles that model and a Python port of its engine; it is not affiliated with the model author. The model files are fetched at build time from the revision pinned in `model-revision.txt` and shipped inside the installer. A daily GitHub Action checks Hugging Face for a newer model and, if tests pass, publishes a new patch release.
 
 ## Development
 

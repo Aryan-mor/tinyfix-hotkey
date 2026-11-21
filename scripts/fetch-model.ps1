@@ -2,7 +2,14 @@
 $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Dest = Join-Path $RepoRoot 'models'
-$Revision = if ($env:TINYFIX_MODEL_REVISION) { $env:TINYFIX_MODEL_REVISION } else { '8efdf5cd91b32584f4077aa0e8ecaf48f7651bef' }
+$PinFile = Join-Path $RepoRoot 'model-revision.txt'
+if ($env:TINYFIX_MODEL_REVISION) {
+    $Revision = $env:TINYFIX_MODEL_REVISION.Trim()
+} elseif (Test-Path $PinFile) {
+    $Revision = (Get-Content -Path $PinFile -Raw).Trim()
+} else {
+    $Revision = '8efdf5cd91b32584f4077aa0e8ecaf48f7651bef'
+}
 
 if ($Revision.Length -lt 40) {
     try {
@@ -14,11 +21,14 @@ if ($Revision.Length -lt 40) {
 }
 
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+$Record = Join-Path $Dest 'REVISION.txt'
+$HaveRevision = if (Test-Path $Record) { (Get-Content $Record -Raw).Trim() } else { '' }
+$Refresh = $HaveRevision -ne $Revision
 $Base = "https://huggingface.co/paperweight/tinyfix/resolve/$Revision"
 $Files = @('wrong-word.onnx', 'wrong-word-vocab.txt', 'wrong-word-confusions.txt', 'words.txt')
 foreach ($Name in $Files) {
     $Out = Join-Path $Dest $Name
-    if ((Test-Path $Out) -and ((Get-Item $Out).Length -gt 0)) {
+    if ((-not $Refresh) -and (Test-Path $Out) -and ((Get-Item $Out).Length -gt 0)) {
         Write-Host "Already have models\$Name"
         continue
     }
@@ -26,5 +36,5 @@ foreach ($Name in $Files) {
     & curl.exe -L --fail --retry 3 --retry-delay 2 -o $Out "$Base/$Name"
     if ($LASTEXITCODE -ne 0) { throw "Failed to download $Name" }
 }
-Set-Content -Path (Join-Path $Dest 'REVISION.txt') -Value $Revision -Encoding utf8
+Set-Content -Path $Record -Value $Revision -Encoding utf8
 Write-Host "Model files are ready in $Dest (revision $Revision)"
