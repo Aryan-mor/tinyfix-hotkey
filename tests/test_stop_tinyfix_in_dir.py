@@ -89,21 +89,31 @@ def _still_running(proc: subprocess.Popen) -> bool:
     return proc.poll() is None
 
 
+def _user_tinyfix_pids() -> set[int]:
+    """PIDs of a TinyFix running from the user's D:\\tools install, if any.
+
+    PowerShell exits with code 1 when Get-Process finds no match, even with
+    SilentlyContinue, so this never uses check=True.
+    """
+    result = subprocess.run(
+        [
+            str(POWERSHELL),
+            "-NoProfile",
+            "-Command",
+            "$ErrorActionPreference = 'SilentlyContinue'; "
+            "Get-Process -Name TinyFix | "
+            "Where-Object { $_.Path -like '*\\tools\\TinyFix Hotkey\\*' } | "
+            "ForEach-Object { $_.Id }; exit 0",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return {int(line.strip()) for line in result.stdout.splitlines() if line.strip().isdigit()}
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows process stop")
 def test_stops_only_tinyfix_in_app_dir(tmp_path: Path):
-    user_pids_before = {
-        int(line.strip())
-        for line in subprocess.check_output(
-            [
-                str(POWERSHELL),
-                "-NoProfile",
-                "-Command",
-                "Get-Process -Name TinyFix -EA SilentlyContinue | Where-Object { $_.Path -like '*\\tools\\TinyFix Hotkey\\*' } | ForEach-Object { $_.Id }",
-            ],
-            text=True,
-        ).splitlines()
-        if line.strip().isdigit()
-    }
+    user_pids_before = _user_tinyfix_pids()
 
     dir_a = tmp_path / "app_a"
     dir_b = tmp_path / "app_b"
@@ -154,19 +164,7 @@ def test_stops_only_tinyfix_in_app_dir(tmp_path: Path):
         assert _still_running(proc_b)
 
         if user_pids_before:
-            still = {
-                int(line.strip())
-                for line in subprocess.check_output(
-                    [
-                        str(POWERSHELL),
-                        "-NoProfile",
-                        "-Command",
-                        "Get-Process -Name TinyFix -EA SilentlyContinue | Where-Object { $_.Path -like '*\\tools\\TinyFix Hotkey\\*' } | ForEach-Object { $_.Id }",
-                    ],
-                    text=True,
-                ).splitlines()
-                if line.strip().isdigit()
-            }
+            still = _user_tinyfix_pids()
             assert user_pids_before <= still
     finally:
         for proc in (proc_a, proc_b):
