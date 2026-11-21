@@ -595,7 +595,7 @@ end;
 
 function TinyFixIsRunningInApp: Boolean;
 begin
-  { Exit code 10 from -ListOnly means a TinyFix.exe from {app} is running. }
+  { Exit code 10 from -RunningCheck means a TinyFix.exe from the install folder is running. }
   Result := RunTinyFixStopScript(True) = 10;
 end;
 
@@ -609,7 +609,7 @@ begin
   I := 0;
   while (I < 15) and TinyFixIsRunningInApp do
   begin
-    Log('TinyFix.exe in {app} is still running; retrying stop');
+    Log('TinyFix.exe in the install folder is still running; retrying stop');
     Sleep(200);
     RunTinyFixStopScript(False);
     Inc(I);
@@ -622,10 +622,10 @@ begin
   Result := '';
   AppWasRunning := TinyFixIsRunningInApp;
   if AppWasRunning then
-    Log('TinyFix was running from {app}; it will be closed and relaunched after install');
+    Log('TinyFix was running from the install folder; it will be closed and relaunched after install');
   StopTinyFixInApp;
   if TinyFixIsRunningInApp then
-    Log('Warning: TinyFix.exe in {app} is still running after the close attempt');
+    Log('Warning: TinyFix.exe in the install folder is still running after the close attempt');
 end;
 
 function InitializeUninstall(): Boolean;
