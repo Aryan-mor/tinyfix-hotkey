@@ -129,10 +129,13 @@ def test_startup_with_broken_pack_never_crashes(app_module, tmp_path):
 
 def test_startup_with_incompatible_pack_explains_why(app_module, tmp_path):
     (app_module.PACK_DIR / "current").mkdir(parents=True)
-    (app_module.PACK_DIR / "current" / "manifest.json").write_text('{"format": 1, "pack_version": 0, "python": "3.13"}')
+    this_python = f"{sys.version_info.major}.{sys.version_info.minor}"  # whichever Python runs the tests (CI uses 3.12)
+    (app_module.PACK_DIR / "current" / "manifest.json").write_text(
+        '{"format": 1, "pack_version": 0, "python": "%s"}' % this_python
+    )
     engine = app_module.load_engine()
     assert not engine.has_model
-    assert "out of date" in app_module.engine_note or "different" in app_module.engine_note
+    assert "out of date" in app_module.engine_note
 
 
 def test_pending_removal_is_applied_before_the_pack_is_loaded(app_module, tmp_path):
