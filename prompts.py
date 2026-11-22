@@ -11,17 +11,38 @@ DEFAULT_FIX_PROMPT = """You are a precise copy editor. Correct spelling, grammar
 
 The text can be in any language. Correct it in its own language and keep that language. Keep the original meaning, tone, voice, formatting, punctuation style, line breaks, and spacing. Do not translate, summarize, rewrite for style, or add or remove content.
 
-Do not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text.
+Style rules, adapted from the No-Slop skill by Soheil Momeni (MIT License, https://github.com/soheilmomeniii/no-slop) and the AI De-Slopifier by Steven Boylan (https://github.com/StevenBoylan/de-slopifier):
+- Never add AI filler or stock phrases the author did not write, such as "delve", "leverage", "seamless", "it is important to note", "in today's rapidly evolving landscape", or "in conclusion".
+- Never invent facts, numbers, names, stance, or personality. Keep every hedge and every rough edge the author chose.
+- Replace any em dash or double-hyphen separator with a comma, colon, period, or parentheses, whichever fits. Keep all other punctuation as written.
+
+Do not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text. Don't use em dashes.
 
 {{content}}
 """
 
 DEFAULT_TRANSLATE_PROMPT = """Translate the text below into {{language}}.
 
-Keep the original meaning, tone, voice, formatting, and line breaks. Do not add a heading, explanation, or commentary. Do not wrap the result in quotation marks or code fences. Return only the translation.
+Keep the original meaning, tone, voice, formatting, and line breaks. Write natural {{language}}, not word-for-word output.
+
+Style rules, adapted from the No-Slop skill by Soheil Momeni (MIT License, https://github.com/soheilmomeniii/no-slop) and the AI De-Slopifier by Steven Boylan (https://github.com/StevenBoylan/de-slopifier):
+- Never add AI filler or stock phrases the author did not write, such as "delve", "leverage", "seamless", "it is important to note", "in today's rapidly evolving landscape", or "in conclusion".
+- Never invent facts, numbers, names, stance, or personality. Keep every hedge and every rough edge the author chose.
+- Replace any em dash or double-hyphen separator with a comma, colon, period, or parentheses, whichever fits. Keep all other punctuation as written.
+
+Do not add a heading, explanation, or commentary. Do not wrap the result in quotation marks or code fences. Return only the translation. Don't use em dashes.
 
 {{content}}
 """
+
+LEGACY_FIX_PROMPTS = (
+    'You are a precise copy editor. Correct spelling, grammar, and typographical errors in the text below, and nothing else.\n\nThe text can be in any language. Correct it in its own language and keep that language. Keep the original meaning, tone, voice, formatting, punctuation style, line breaks, and spacing. Do not translate, summarize, rewrite for style, or add or remove content.\n\nDo not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text.\n\n{{content}}\n',
+    'You are a precise copy editor. Correct spelling, grammar, and typographical errors in the text below, and nothing else.\n\nKeep the original meaning, tone, voice, formatting, punctuation style, line breaks, spacing, and language. Do not translate, summarize, rewrite for style, or add or remove content.\n\nDo not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text.\n\n{{content}}\n',
+)
+
+LEGACY_TRANSLATE_PROMPTS = (
+    'Translate the text below into {{language}}.\n\nKeep the original meaning, tone, voice, formatting, and line breaks. Do not add a heading, explanation, or commentary. Do not wrap the result in quotation marks or code fences. Return only the translation.\n\n{{content}}\n',
+)
 
 DEFAULT_TARGET_LANGUAGE = "English"
 

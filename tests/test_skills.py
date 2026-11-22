@@ -350,3 +350,31 @@ def test_unedited_old_improve_prompt_is_upgraded_but_custom_is_kept():
     skill.prompt = "my own prompt {{content}}"
     ensure_builtins(store)
     assert skill.prompt == "my own prompt {{content}}"
+
+
+def test_unedited_old_fix_and_translate_prompts_are_upgraded_but_custom_is_kept():
+    from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TRANSLATE_PROMPT, LEGACY_FIX_PROMPTS, LEGACY_TRANSLATE_PROMPTS
+    from skills import SKILL_FIX, SKILL_FIX_ALL, SKILL_TRANSLATE, default_store, ensure_builtins
+
+    store = default_store()
+    by_id = {s.id: s for s in store.skills}
+    by_id[SKILL_FIX].prompt = LEGACY_FIX_PROMPTS[0]
+    by_id[SKILL_FIX_ALL].prompt = LEGACY_FIX_PROMPTS[1]
+    by_id[SKILL_TRANSLATE].prompt = LEGACY_TRANSLATE_PROMPTS[0]
+    ensure_builtins(store)
+    assert by_id[SKILL_FIX].prompt == DEFAULT_FIX_PROMPT
+    assert by_id[SKILL_FIX_ALL].prompt == DEFAULT_FIX_PROMPT
+    assert by_id[SKILL_TRANSLATE].prompt == DEFAULT_TRANSLATE_PROMPT
+
+    by_id[SKILL_FIX].prompt = "my own {{content}}"
+    ensure_builtins(store)
+    assert by_id[SKILL_FIX].prompt == "my own {{content}}"
+
+
+def test_fix_and_translate_defaults_carry_slop_rules_and_end_with_em_dash_rule():
+    from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TRANSLATE_PROMPT
+
+    for prompt in (DEFAULT_FIX_PROMPT, DEFAULT_TRANSLATE_PROMPT):
+        assert "No-Slop" in prompt and "De-Slopifier" in prompt
+        assert "Don't use em dashes." in prompt
+        assert "{{content}}" in prompt

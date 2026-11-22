@@ -23,7 +23,9 @@ from prompts import (
     DEFAULT_REWRITE_LANGUAGE_PROMPT,
     DEFAULT_REWRITE_PROMPT,
     DEFAULT_TRANSLATE_PROMPT,
+    LEGACY_FIX_PROMPTS,
     LEGACY_IMPROVE_PROMPTS,
+    LEGACY_TRANSLATE_PROMPTS,
     render_prompt,
 )
 
@@ -322,6 +324,10 @@ def ensure_builtins(store: SkillStore, **legacy) -> SkillStore:
         if skill.id == SKILL_IMPROVE_PROMPT and skill.prompt.strip() in {p.strip() for p in LEGACY_IMPROVE_PROMPTS}:
             # Unedited copy of an older default: upgrade it. Customised prompts are left alone.
             skill.prompt = DEFAULT_IMPROVE_PROMPT
+        if skill.id in (SKILL_FIX, SKILL_FIX_ALL) and skill.prompt.strip() in {p.strip() for p in LEGACY_FIX_PROMPTS}:
+            skill.prompt = DEFAULT_FIX_PROMPT
+        if skill.id == SKILL_TRANSLATE and skill.prompt.strip() in {p.strip() for p in LEGACY_TRANSLATE_PROMPTS}:
+            skill.prompt = DEFAULT_TRANSLATE_PROMPT
     return store
 
 
