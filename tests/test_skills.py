@@ -21,6 +21,7 @@ from skills import (
     SKILL_FIX_ALL,
     SKILL_REWRITE,
     SKILL_REWRITE_LANGUAGE,
+    SKILL_IMPROVE_PROMPT,
     SKILL_TRANSLATE,
     Skill,
     SkillStore,
@@ -49,6 +50,7 @@ def test_default_skills_include_fix_translate_and_rewrite():
         SKILL_TRANSLATE,
         SKILL_REWRITE,
         SKILL_REWRITE_LANGUAGE,
+        SKILL_IMPROVE_PROMPT,
     ]
     assert [skill.name for skill in skills] == [
         "Fix",
@@ -56,8 +58,10 @@ def test_default_skills_include_fix_translate_and_rewrite():
         "Translate",
         "Rewrite",
         "Rewrite to target language",
+        "Improve prompt",
     ]
-    fix, fix_all, translate, rewrite, rewrite_lang = skills
+    fix, fix_all, translate, rewrite, rewrite_lang, improve = skills
+    assert improve.builtin and improve.enabled and improve.hotkey == "none" and not improve.offline_fallback
     assert fix.input_mode == INPUT_SELECTION
     assert fix_all.input_mode == INPUT_SELECT_ALL
     assert translate.input_mode == INPUT_SELECTION
@@ -252,12 +256,12 @@ def test_ensure_builtins_appends_missing_rewrite_skills(tmp_path: Path):
     store.get(SKILL_TRANSLATE).prompt = "Stay: {{content}}"
     save_skill_store(path, store)
     loaded = json.loads(path.read_text(encoding="utf-8"))
-    loaded["skills"] = [s for s in loaded["skills"] if s.get("id") not in (SKILL_REWRITE, SKILL_REWRITE_LANGUAGE)]
+    loaded["skills"] = [s for s in loaded["skills"] if s.get("id") not in (SKILL_REWRITE, SKILL_REWRITE_LANGUAGE, SKILL_IMPROVE_PROMPT)]
     path.write_text(json.dumps(loaded, indent=2), encoding="utf-8")
 
     store2, _ = load_skill_store(path)
     ids = [s.id for s in store2.skills]
-    assert ids[-2:] == [SKILL_REWRITE, SKILL_REWRITE_LANGUAGE]
+    assert ids[-3:] == [SKILL_REWRITE, SKILL_REWRITE_LANGUAGE, SKILL_IMPROVE_PROMPT]
     assert store2.get(SKILL_FIX).hotkey == "F9"
     assert store2.get(SKILL_FIX).enabled is False
     assert "Stay:" in store2.get(SKILL_TRANSLATE).prompt

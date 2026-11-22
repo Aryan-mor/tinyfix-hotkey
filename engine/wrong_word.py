@@ -3,14 +3,15 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-
-import numpy as np
-import onnxruntime as ort
+from typing import TYPE_CHECKING
 
 from .fixer import Correction
 from .rules import is_checkable, is_sentence_start, match_case
 from .trie import WordTrie
 from .typo_cost import typo_cost
+
+if TYPE_CHECKING:  # numpy/onnxruntime live in the optional offline pack, import them lazily
+    import numpy as np
 
 LEFT_WINDOW = 16
 RIGHT_WINDOW = 4
@@ -95,12 +96,16 @@ def tokenize(text: str, starts_sentence: bool) -> list[str]:
 
 class OnnxModel:
     def __init__(self, path: str) -> None:
+        import onnxruntime as ort
+
         so = ort.SessionOptions()
         so.intra_op_num_threads = 1
         so.inter_op_num_threads = 1
         self.session = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
 
     def run(self, left: np.ndarray, right: np.ndarray, candidates: np.ndarray) -> np.ndarray:
+        import numpy as np
+
         outputs = self.session.run(
             ["scores"],
             {
@@ -176,6 +181,8 @@ class WrongWordChecker:
         after_ids = [self.token_id(token) for token in tokenize(text_after, False)[:RIGHT_WINDOW]]
         after_ids.reverse()
         right = _pad(after_ids, RIGHT_WINDOW)
+        import numpy as np
+
         batch = len(rows)
         left_arr = np.tile(np.array(left, dtype=np.int64), (batch, 1))
         right_arr = np.tile(np.array(right, dtype=np.int64), (batch, 1))

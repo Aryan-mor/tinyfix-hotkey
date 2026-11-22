@@ -37,7 +37,7 @@ jobs:
           $tag = $env:TAG
           if (-not $tag) { throw "Release tag is missing" }
           if (gh release view $tag) {
-            gh release upload $tag dist/TinyFix-Setup.exe --clobber
+            gh release upload $tag dist/TinyFix-Setup.exe dist/SHA256SUMS.txt --clobber
           } else {
-            gh release create $tag dist/TinyFix-Setup.exe --title "TinyFix Hotkey $tag" --generate-notes --latest
+            gh release create $tag dist/TinyFix-Setup.exe dist/SHA256SUMS.txt --title "TinyFix Hotkey $tag" --generate-notes --latest
           }

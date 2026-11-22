@@ -256,9 +256,22 @@ def probe_connection(config: LLMConfig, timeout: float | None = None) -> str:
     return complete(config, prompt, timeout=wait)
 
 
-def correct_online(config: LLMConfig, text: str) -> str:
+# Without the offline pack the fallback is only the basic dictionary engine, which is much weaker than the online
+# model, so the online model gets more time before TinyFix gives up on it.
+NO_LOCAL_MODEL_TIMEOUT = 10.0
+
+
+def fix_timeout(config: LLMConfig, engine) -> float:
+    """Seconds to wait for the online Fix: the user's setting, or at least 10 s when no local model backs it up."""
+    base = float(config.timeout or DEFAULT_TIMEOUT)
+    if engine is not None and getattr(engine, "has_model", False):
+        return base
+    return max(base, NO_LOCAL_MODEL_TIMEOUT)
+
+
+def correct_online(config: LLMConfig, text: str, timeout: float | None = None) -> str:
     prompt = render_prompt(config.fix_prompt or DEFAULT_FIX_PROMPT, text)
-    return complete(config, prompt, timeout=config.timeout)
+    return complete(config, prompt, timeout=config.timeout if timeout is None else timeout)
 
 
 def translate_online(config: LLMConfig, text: str) -> str:
@@ -271,7 +284,7 @@ def correct_with_fallback(text: str, engine, config: LLMConfig | None) -> tuple[
     """Return (corrected_text, source) where source is 'online', 'offline', or 'fallback'."""
     if config is not None and config.ready:
         try:
-            result = correct_online(config, text)
+            result = correct_online(config, text, timeout=fix_timeout(config, engine))
             if result:
                 return result, "online"
             logger.info("Online correction returned empty text; falling back to the offline engine")
@@ -289,12 +302,18 @@ def correct_with_fallback(text: str, engine, config: LLMConfig | None) -> tuple[
     return engine.fix(text), "offline"
 
 
+# Skills (Translate, Rewrite, Improve prompt, custom) generate longer text and the user is already waiting on a
+# "Running…" toast, so they get more time than the 2 s Fix path. Measured: normal answers take 0.5-1.5 s but some
+# take 3-10 s.
+SKILL_MIN_TIMEOUT = 10.0
+
+
 def run_skill_online(config: LLMConfig, template: str, text: str, language: str | None = None) -> str:
     """Run a skill prompt online. No offline fallback."""
     if config is None or not config.ready:
         raise LLMError("Turn on an online model in Settings to use this skill")
     prompt = render_prompt(template or "", text, language=language)
-    result = complete(config, prompt, timeout=config.timeout)
+    result = complete(config, prompt, timeout=max(float(config.timeout or 0), SKILL_MIN_TIMEOUT))
     cleaned = strip_model_output(result)
     if not cleaned:
         raise LLMError("The model returned empty text")

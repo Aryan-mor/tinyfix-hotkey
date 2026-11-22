@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from tkinter import ttk
 from typing import Callable
 
+from skills_page import SkillsPage, SkillsPageHooks
 from hotkey_util import (
     DEFAULT_HOTKEY,
     DEFAULT_HOTKEY_ALL,
@@ -39,12 +40,14 @@ from skills import (
     SKILL_FIX_ALL,
     SKILL_REWRITE,
     SKILL_REWRITE_LANGUAGE,
+    SKILL_IMPROVE_PROMPT,
     SKILL_TRANSLATE,
     Skill,
     default_skills,
     duplicate_skill,
     find_conflicts,
     new_custom_skill,
+    parse_skill_hotkey,
 )
 from tinyfix_lib import DEFAULT_SENSITIVITY, SENSITIVITY_NAMES
 
@@ -88,6 +91,7 @@ class SettingsData:
     last_update_check: str = ""
     skills: list[Skill] = field(default_factory=default_skills)
     skill_menu_hotkey: Hotkey = field(default_factory=lambda: parse_hotkey(DEFAULT_HOTKEY_MENU))
+    dismissed_skills: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -96,6 +100,13 @@ class SettingsHooks:
     on_check_updates: Callable[[], None] | None = None
     on_live_sensitivity: Callable[[str], None] | None = None
     on_test_skill: Callable[[Skill, str], str] | None = None
+    on_recording: Callable[[bool], None] | None = None  # pause/resume the global shortcuts while one is chosen
+    # Offline pack (all optional; the tab is hidden when pack_info is missing).
+    pack_info: Callable[[], dict] | None = None
+    pack_download: Callable[[Callable[[int, int], None], Callable[[str | None], None]], None] | None = None
+    pack_cancel: Callable[[], None] | None = None
+    pack_set_enabled: Callable[[bool, Callable[[str | None], None]], None] | None = None
+    pack_remove: Callable[[], str] | None = None
 
 
 _open_window: tk.Tk | None = None
@@ -154,8 +165,50 @@ def _hotkey_spec_from_row(hk_enabled: bool, display: str, default: str = "none")
 
 
 _BUILTIN_SKILL_IDS = frozenset(
-    {SKILL_FIX, SKILL_FIX_ALL, SKILL_TRANSLATE, SKILL_REWRITE, SKILL_REWRITE_LANGUAGE}
+    {SKILL_FIX, SKILL_FIX_ALL, SKILL_TRANSLATE, SKILL_REWRITE, SKILL_REWRITE_LANGUAGE, SKILL_IMPROVE_PROMPT}
 )
+
+
+def _has_style(name: str) -> bool:
+    try:
+        return bool(ttk.Style().layout(name))
+    except tk.TclError:
+        return False
+
+
+def friendly_key_error(message: str) -> str:
+    """Turn a provider error into one plain sentence a first-time user can act on."""
+    text = (message or "").lower()
+    if any(word in text for word in ("api key not valid", "api_key_invalid", "401", "403", "permission", "unauthor", "invalid key", "invalid api key")):
+        return "Google did not accept this key. Copy it again from AI Studio and paste the whole key."
+    if any(word in text for word in ("429", "quota", "rate limit", "resource_exhausted")):
+        return "This key has used up its free allowance for now. Wait a bit and test again."
+    if any(word in text for word in ("timed out", "timeout", "getaddrinfo", "urlopen", "name resolution", "unreachable", "connection")):
+        return "Could not reach Google. Check your internet connection and test again."
+    return message
+
+
+def key_hint(key: str) -> str:
+    """Instant, offline hint about a pasted key. Only the Test button can really confirm it."""
+    raw = key or ""
+    if not raw.strip():
+        return ""
+    if any(ch.isspace() for ch in raw.strip()):
+        return "The key has spaces in it. Copy the whole key again."
+    if raw != raw.strip():
+        return "There are spaces around the key. TinyFix ignores them."
+    if len(raw) < 20:
+        return "That looks too short. Copy the whole key."
+    return "Looks like a key. Click Test to check it."
+
+
+KEY_STEPS = (
+    "1.  Click “Open Google AI Studio” and sign in with a Google account.\n"
+    "2.  Click “Create API key” (pick or create a project if it asks).\n"
+    "3.  Copy the key it shows.\n"
+    "4.  Paste it in the API key box above, then click Test."
+)
+KEY_PRIVACY = "Free to start. The key stays on this PC, encrypted by Windows, and is only sent to Google."
 
 
 class SettingsWindow:
@@ -164,16 +217,14 @@ class SettingsWindow:
         self.hooks = hooks
         self._tested_ok = bool(data.llm.ready)
         self._loading = True
-        self._record_target: tk.StringVar | None = None
-        self._record_enabled: tk.BooleanVar | None = None
         # Use a Toplevel when a dedicated UI thread already has a hidden root.
         # Creating a second Tk() + mainloop() on the pystray thread makes
         # controls appear but ignore clicks and never log a save.
         self.root = tk.Toplevel(master) if master is not None else tk.Tk()
         self._owns_mainloop = master is None
         self.root.title("TinyFix Settings")
-        self.root.minsize(720, 560)
-        self.root.geometry("760x640+340+120")
+        self.root.minsize(760, 620)
+        self.root.geometry("800x700+320+60")
         try:
             self.root.attributes("-topmost", True)
             self.root.after(400, lambda: self.root.attributes("-topmost", False))
@@ -191,170 +242,50 @@ class SettingsWindow:
         self.notebook = ttk.Notebook(shell)
         self.notebook.grid(row=0, column=0, sticky="nsew")
 
-        self.skills = [Skill.from_dict(skill.to_dict()) for skill in (data.skills or default_skills())]
-        if not self.skills:
-            self.skills = default_skills()
-
-        self._build_shortcuts()
         self.target_language = tk.StringVar(value=self.data.llm.target_language or DEFAULT_TARGET_LANGUAGE)
         self._build_skills()
         self._build_sensitivity()
+        self._build_offline()
         self._build_online()
-        self._build_prompts()
         self._build_updates()
         self._build_about()
 
         buttons = ttk.Frame(shell)
         buttons.grid(row=1, column=0, sticky="e", pady=(16, 0))
         ttk.Button(buttons, text="Cancel", command=self._cancel).pack(side="right", padx=(8, 0))
-        ttk.Button(buttons, text="OK", command=self._ok).pack(side="right")
+        ok_style = "Accent.TButton" if _has_style("Accent.TButton") else "TButton"
+        ttk.Button(buttons, text="OK", command=self._ok, style=ok_style).pack(side="right")
         ttk.Button(buttons, text="Apply", command=self._apply).pack(side="right", padx=(0, 8))
 
         self._loading = False
         self._sync_use_online_state()
-        self.root.bind("<KeyPress>", self._on_global_key)
+        self.root.bind("<Return>", self._on_return)
+        self.root.bind("<Escape>", self._on_escape)
         self.root.protocol("WM_DELETE_WINDOW", self._cancel)
         try:
             self.root.focus_force()
         except tk.TclError:
             pass
 
+    def _on_return(self, event) -> None:
+        """Return confirms like the default button, except where Return has its own job."""
+        if self.skills_page.is_editing:
+            return  # on the skill page Return belongs to the form, not to OK
+        if event.widget.winfo_class() in ("Text", "TButton", "Treeview", "Listbox", "TCombobox", "TCheckbutton", "TRadiobutton"):
+            return
+        self._ok()
+
+    def _on_escape(self, _event) -> None:
+        if self.skills_page.is_editing:
+            self.skills_page.cancel_editing()  # Escape steps back from the skill page, it does not close Settings
+            return
+        self._cancel()
+
     def _tab(self, title: str) -> ttk.Frame:
         frame = ttk.Frame(self.notebook, padding=16)
         self.notebook.add(frame, text=title)
         frame.columnconfigure(0, weight=1)
         return frame
-
-    def _build_shortcuts(self) -> None:
-        tab = self._tab("Shortcuts")
-        ttk.Label(
-            tab,
-            text="Each shortcut can be turned off. Click Record and press a new combination, or choose None/Disabled.",
-            wraplength=640,
-        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
-
-        self.sel_enabled = tk.BooleanVar(value=not self.data.hotkey.is_disabled)
-        self.all_enabled = tk.BooleanVar(value=not self.data.hotkey_all.is_disabled)
-        self.tr_enabled = tk.BooleanVar(value=not self.data.hotkey_translate.is_disabled)
-        self.sel_key = tk.StringVar(value=_format_hotkey(self.data.hotkey))
-        self.all_key = tk.StringVar(value=_format_hotkey(self.data.hotkey_all))
-        self.tr_key = tk.StringVar(value=_format_hotkey(self.data.hotkey_translate))
-        self.translate_select_all = tk.BooleanVar(value=self.data.translate_select_all)
-        self.record_status = tk.StringVar(value="")
-
-        self._shortcut_row(tab, 1, "Fix selection", "Correct the highlighted text.", self.sel_enabled, self.sel_key)
-        self._shortcut_row(tab, 2, "Fix all", "Select the whole field, then correct it.", self.all_enabled, self.all_key)
-        self._shortcut_row(
-            tab,
-            3,
-            "Translate",
-            "Replace the selection with a translation. Only runs when an online model is enabled. You can also add more skills on the Skills tab.",
-            self.tr_enabled,
-            self.tr_key,
-        )
-        self.menu_enabled = tk.BooleanVar(value=not self.data.skill_menu_hotkey.is_disabled)
-        self.menu_key = tk.StringVar(value=_format_hotkey(self.data.skill_menu_hotkey))
-        self._shortcut_row(
-            tab,
-            4,
-            "Skill menu",
-            "Opens a small menu of enabled skills next to the caret or mouse cursor. Default: Ctrl+Alt+M.",
-            self.menu_enabled,
-            self.menu_key,
-        )
-        ttk.Checkbutton(
-            tab,
-            text="Translate: select the whole field first",
-            variable=self.translate_select_all,
-        ).grid(row=5, column=0, sticky="w", pady=(8, 0))
-        ttk.Label(tab, textvariable=self.record_status, foreground="#555555").grid(
-            row=6, column=0, sticky="w", pady=(12, 0)
-        )
-
-    def _shortcut_row(
-        self,
-        tab: ttk.Frame,
-        row: int,
-        title: str,
-        hint: str,
-        enabled: tk.BooleanVar,
-        key_var: tk.StringVar,
-    ) -> None:
-        box = ttk.LabelFrame(tab, text=title, padding=10)
-        box.grid(row=row, column=0, sticky="ew", pady=(0, 10))
-        box.columnconfigure(1, weight=1)
-        ttk.Checkbutton(box, text="Enabled", variable=enabled).grid(row=0, column=0, sticky="w")
-        ttk.Entry(box, textvariable=key_var, state="readonly", width=28).grid(row=0, column=1, sticky="ew", padx=8)
-        ttk.Button(box, text="Record", command=lambda: self._start_record(key_var, enabled)).grid(row=0, column=2)
-        ttk.Button(box, text="Disable", command=lambda: self._disable_row(key_var, enabled)).grid(row=0, column=3, padx=(8, 0))
-        ttk.Label(box, text=hint, foreground="#555555").grid(row=1, column=0, columnspan=4, sticky="w", pady=(6, 0))
-
-    def _disable_row(self, key_var: tk.StringVar, enabled: tk.BooleanVar) -> None:
-        enabled.set(False)
-        key_var.set(DISABLED_LABEL)
-        self.record_status.set("")
-        self._record_target = None
-
-    def _start_record(self, key_var: tk.StringVar, enabled: tk.BooleanVar) -> None:
-        self._record_target = key_var
-        self._record_enabled = enabled
-        self.record_status.set("Press the new shortcut, or Esc to cancel.")
-        self.root.focus_force()
-
-    def _on_global_key(self, event: tk.Event) -> None:
-        if self._record_target is None:
-            return
-        if event.keysym in _MOD_KEYSYMS:
-            return
-        if event.keysym in {"Escape"}:
-            self._record_target = None
-            self.record_status.set("Recording cancelled.")
-            return
-        parts: list[str] = []
-        state = int(event.state)
-        if state & 0x4:
-            parts.append("Ctrl")
-        if state & 0x20000 or state & 0x8:
-            parts.append("Alt")
-        if state & 0x1:
-            parts.append("Shift")
-        if state & 0x40000:
-            parts.append("Win")
-        key = event.keysym
-        mapping = {
-            "space": "Space",
-            "Return": "Enter",
-            "Escape": "Esc",
-            "BackSpace": "Backspace",
-            "Prior": "PageUp",
-            "Next": "PageDown",
-            "plus": "Plus",
-            "minus": "Minus",
-        }
-        if key.startswith("F") and key[1:].isdigit():
-            name = key
-        elif key in mapping:
-            name = mapping[key]
-        elif len(key) == 1:
-            name = key.upper()
-        else:
-            name = key
-        parts.append(name)
-        spec = "+".join(parts)
-        try:
-            parsed = parse_hotkey(spec)
-        except ValueError:
-            self.record_status.set(f"Could not use {spec}. Try again.")
-            return
-        if not parsed.is_safe():
-            self.record_status.set("Please include a modifier (Ctrl, Alt, Shift, or Win) unless this is a function key.")
-            return
-        self._record_target.set(parsed.display)
-        if self._record_enabled is not None:
-            self._record_enabled.set(True)
-        self.record_status.set(f"Set to {parsed.display}.")
-        self._record_target = None
-        self._record_enabled = None
 
     def _build_sensitivity(self) -> None:
         tab = self._tab("Sensitivity")
@@ -382,6 +313,174 @@ class SettingsWindow:
     def _on_sensitivity(self) -> None:
         if self.hooks.on_live_sensitivity:
             self.hooks.on_live_sensitivity(self.sensitivity.get())
+
+    # ------------------------------------------------------------------ offline pack tab
+
+    def _pack(self) -> dict:
+        try:
+            return self.hooks.pack_info() if self.hooks.pack_info else {}
+        except Exception:
+            return {}
+
+    def _build_offline(self) -> None:
+        self._pack_busy = False
+        self._closed = False
+        if self.hooks.pack_info is None:
+            return
+        tab = self._tab("Offline engine")
+        ttk.Label(
+            tab,
+            text="Basic offline fixes (spelling) are always on and need nothing extra.",
+            font=("Segoe UI", 10, "bold"),
+            wraplength=640,
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            tab,
+            text="The optional offline pack adds smarter, context-aware fixes, such as their / they’re. "
+            "It is a separate download. You can turn it off or remove it at any time.",
+            wraplength=640,
+        ).grid(row=1, column=0, sticky="w", pady=(6, 10))
+        info = self._pack()
+        self.pack_sizes = tk.StringVar(value=self._pack_size_text(info))
+        ttk.Label(tab, textvariable=self.pack_sizes, foreground="#555555", wraplength=640).grid(row=2, column=0, sticky="w")
+        self.pack_status = tk.StringVar(value="")
+        ttk.Label(tab, textvariable=self.pack_status, wraplength=640, font=("Segoe UI", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(14, 6))
+        self.pack_bar = ttk.Progressbar(tab, mode="determinate", maximum=100)
+        self.pack_bar.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+        self.pack_bar.grid_remove()
+        row = ttk.Frame(tab)
+        row.grid(row=5, column=0, sticky="w")
+        self.pack_download_btn = ttk.Button(row, text="Download and install", command=self._pack_download_clicked)
+        self.pack_download_btn.pack(side="left")
+        self.pack_remove_btn = ttk.Button(row, text="Remove files", command=self._pack_remove_clicked)
+        self.pack_remove_btn.pack(side="left", padx=(8, 0))
+        self.pack_enabled = tk.BooleanVar(value=bool(info.get("enabled", True)))
+        self.pack_use = ttk.Checkbutton(tab, text="Use the offline pack", variable=self.pack_enabled, command=self._pack_toggle_clicked)
+        self.pack_use.grid(row=6, column=0, sticky="w", pady=(12, 0))
+        ttk.Label(
+            tab,
+            text="Turning it off goes back to basic fixes right away. Windows only gives the memory back "
+            "fully the next time TinyFix starts.",
+            foreground="#555555",
+            wraplength=640,
+        ).grid(row=7, column=0, sticky="w", pady=(8, 0))
+        self._refresh_pack()
+
+    @staticmethod
+    def _pack_size_text(info: dict) -> str:
+        return (
+            f"Download about {info.get('download_mb', 25)} MB  •  "
+            f"uses about {info.get('disk_mb', 77)} MB on disk  •  "
+            f"about {info.get('ram_mb', 40)} MB more memory while it is on"
+        )
+
+    def _pack_after(self, fn) -> None:
+        """Run fn on the Tk thread if the window is still open."""
+
+        def guarded() -> None:
+            if not self._closed:
+                try:
+                    fn()
+                except tk.TclError:
+                    pass
+
+        try:
+            self.root.after(0, guarded)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _refresh_pack(self) -> None:
+        info = self._pack()
+        installed = bool(info.get("installed"))
+        compatible = bool(info.get("compatible"))
+        busy = self._pack_busy
+        if info.get("removal_pending"):
+            text = "Removal is waiting for the next start of TinyFix."
+        elif not installed:
+            text = "Not installed. TinyFix is using basic offline fixes."
+        elif not compatible:
+            text = f"Installed, but it cannot be used: {info.get('reason', 'unknown problem')}"
+        elif info.get("active"):
+            text = "Installed and in use."
+        elif not info.get("enabled", True):
+            text = "Installed, switched off."
+        else:
+            text = "Installed. It will load the next time TinyFix starts."
+            if info.get("note"):
+                text = f"{text} ({info['note']})"
+        if not busy:
+            self.pack_status.set(text)
+        self.pack_enabled.set(bool(info.get("enabled", True)) and installed and compatible)
+        self.pack_download_btn.configure(
+            text="Update the pack" if installed and not compatible else "Download and install",
+            state="disabled" if busy or (installed and compatible) else "normal",
+        )
+        self.pack_remove_btn.configure(state="disabled" if busy or not installed else "normal")
+        self.pack_use.configure(state="disabled" if busy or not (installed and compatible) else "normal")
+
+    def _pack_download_clicked(self) -> None:
+        if not self.hooks.pack_download or self._pack_busy:
+            return
+        self._pack_busy = True
+        self.pack_bar.configure(value=0)
+        self.pack_bar.grid()
+        self.pack_status.set("Downloading…")
+        self.pack_download_btn.configure(text="Cancel", command=self._pack_cancel_clicked, state="normal")
+        self.pack_remove_btn.configure(state="disabled")
+        self.pack_use.configure(state="disabled")
+
+        def progress(done: int, total: int) -> None:
+            percent = 100 * done / total if total else 0
+            self._pack_after(lambda: (self.pack_bar.configure(value=percent), self.pack_status.set(f"Downloading… {percent:.0f}%")))
+
+        def finished(error: str | None) -> None:
+            def ui() -> None:
+                self._pack_busy = False
+                self.pack_bar.grid_remove()
+                self.pack_download_btn.configure(text="Download and install", command=self._pack_download_clicked)
+                self._refresh_pack()
+                if error:
+                    self.pack_status.set(error)
+
+            self._pack_after(ui)
+
+        self.hooks.pack_download(progress, finished)
+
+    def _pack_cancel_clicked(self) -> None:
+        if self.hooks.pack_cancel:
+            self.hooks.pack_cancel()
+        self.pack_status.set("Cancelling…")
+        self.pack_download_btn.configure(state="disabled")
+
+    def _pack_toggle_clicked(self) -> None:
+        if not self.hooks.pack_set_enabled or self._pack_busy:
+            return
+        wanted = bool(self.pack_enabled.get())
+        self._pack_busy = True
+        self.pack_status.set("Switching…")
+        self._refresh_pack()
+
+        def finished(error: str | None) -> None:
+            def ui() -> None:
+                self._pack_busy = False
+                self._refresh_pack()
+                if error:
+                    self.pack_status.set(error)
+
+            self._pack_after(ui)
+
+        self.hooks.pack_set_enabled(wanted, finished)
+
+    def _pack_remove_clicked(self) -> None:
+        if not self.hooks.pack_remove or self._pack_busy:
+            return
+        from tkinter import messagebox
+
+        if not messagebox.askyesno("Remove offline pack", "Remove the offline pack files? You can download it again later.", parent=self.root):
+            return
+        message = self.hooks.pack_remove()
+        self._refresh_pack()
+        self.pack_status.set(message)
 
     def _build_online(self) -> None:
         tab = self._tab("Online AI")
@@ -424,11 +523,24 @@ class SettingsWindow:
         ttk.Checkbutton(tab, text="Show", variable=self.show_key, command=self._toggle_key).grid(row=2, column=2, padx=(8, 0))
         self.api_key.trace_add("write", lambda *_: self._invalidate_test())
 
-        self.key_help = ttk.Label(tab, text="Get a Gemini API key from Google AI Studio", foreground="#0b57d0", cursor="hand2")
-        self.key_help.grid(row=3, column=1, sticky="w")
-        self.key_help.bind("<Button-1>", lambda *_: webbrowser.open(AISTUDIO_KEY_URL))
+        # One cell holds the instant key hint plus either the Gemini steps or the OpenAI-style note.
+        help_cell = ttk.Frame(tab)
+        help_cell.grid(row=3, column=1, columnspan=2, sticky="ew")
+        self.key_hint = tk.StringVar(value=key_hint(self.api_key.get()))
+        ttk.Label(help_cell, textvariable=self.key_hint, foreground="#555555", wraplength=520).pack(anchor="w")
+        self.api_key.trace_add("write", lambda *_: self.key_hint.set(key_hint(self.api_key.get())))
+        self.key_help = ttk.Label(help_cell, text="", foreground="#555555", wraplength=520)
+        self.key_steps = ttk.Frame(help_cell)
+        ttk.Label(self.key_steps, text="How to get a Gemini API key", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(self.key_steps, text=KEY_STEPS, justify="left", wraplength=500).pack(anchor="w", pady=(4, 0))
+        link_row = ttk.Frame(self.key_steps)
+        link_row.pack(anchor="w", pady=(8, 0))
+        ttk.Button(link_row, text="Open Google AI Studio", command=lambda: webbrowser.open(AISTUDIO_KEY_URL)).pack(side="left")
+        ttk.Label(link_row, text=AISTUDIO_KEY_URL, foreground="#0b57d0", cursor="hand2").pack(side="left", padx=(10, 0))
+        ttk.Label(self.key_steps, text=KEY_PRIVACY, foreground="#555555", wraplength=500, justify="left").pack(anchor="w", pady=(8, 0))
 
-        ttk.Label(tab, text="Base URL").grid(row=4, column=0, sticky="w")
+        self.base_label = ttk.Label(tab, text="Base URL")
+        self.base_label.grid(row=4, column=0, sticky="w")
         self.base_entry = ttk.Entry(tab, textvariable=self.base_url)
         self.base_entry.grid(row=4, column=1, columnspan=2, sticky="ew", pady=4)
         self.base_url.trace_add("write", lambda *_: self._invalidate_test())
@@ -441,6 +553,7 @@ class SettingsWindow:
 
         ttk.Label(tab, text="Timeout (seconds)").grid(row=6, column=0, sticky="w")
         ttk.Spinbox(tab, from_=1, to=30, textvariable=self.timeout, width=8).grid(row=6, column=1, sticky="w", pady=4)
+        ttk.Label(tab, text="Without the offline pack, TinyFix waits at least 10 seconds.", foreground="#555555").grid(row=6, column=2, sticky="w", padx=(8, 0))
 
         ttk.Button(tab, text="Test", command=self._test_clicked).grid(row=7, column=0, sticky="w", pady=(12, 0))
         ttk.Label(tab, textvariable=self.online_status, wraplength=500).grid(row=7, column=1, columnspan=2, sticky="w", pady=(12, 0))
@@ -456,12 +569,20 @@ class SettingsWindow:
             if value == label:
                 self.provider.set(key)
         is_openai = self.provider.get() == PROVIDER_OPENAI
-        state = "normal" if is_openai else "disabled"
-        self.base_entry.configure(state=state)
+        self.base_entry.configure(state="normal" if is_openai else "disabled")
+        if is_openai:
+            self.base_label.grid()
+            self.base_entry.grid()
+        else:
+            self.base_label.grid_remove()
+            self.base_entry.grid_remove()
         if is_openai:
             self.key_help.configure(text="Works with OpenAI, OpenRouter, Groq, Ollama, LM Studio, and other /v1 APIs")
+            self.key_steps.pack_forget()
+            self.key_help.pack(anchor="w", pady=(4, 0))
         else:
-            self.key_help.configure(text="Get a Gemini API key from Google AI Studio")
+            self.key_help.pack_forget()
+            self.key_steps.pack(anchor="w", fill="x", pady=(4, 8))
             if hasattr(self, "model_box"):
                 self.model_box.configure(values=self._model_choices())
                 if not (self.model.get() or "").strip():
@@ -507,18 +628,12 @@ class SettingsWindow:
             target_language=self.data.llm.target_language or DEFAULT_TARGET_LANGUAGE,
         )
         if include_prompts:
-            if hasattr(self, "fix_prompt"):
-                config.fix_prompt = self.fix_prompt.get("1.0", "end").rstrip("\n") + "\n"
-                config.translate_prompt = self.translate_prompt.get("1.0", "end").rstrip("\n") + "\n"
-            elif getattr(self, "skills", None):
-                self._flush_skill_editor()
-                by_id = {skill.id: skill for skill in self.skills}
-                if SKILL_FIX in by_id:
-                    config.fix_prompt = by_id[SKILL_FIX].prompt
-                if SKILL_TRANSLATE in by_id:
-                    config.translate_prompt = by_id[SKILL_TRANSLATE].prompt
-            if hasattr(self, "target_language"):
-                config.target_language = self.target_language.get().strip() or DEFAULT_TARGET_LANGUAGE
+            by_id = {skill.id: skill for skill in self.skills}
+            if SKILL_FIX in by_id:
+                config.fix_prompt = by_id[SKILL_FIX].prompt
+            if SKILL_TRANSLATE in by_id:
+                config.translate_prompt = by_id[SKILL_TRANSLATE].prompt
+            config.target_language = self.target_language.get().strip() or DEFAULT_TARGET_LANGUAGE
         return config
 
     def _model_choices(self, names: list[str] | None = None) -> list[str]:
@@ -570,6 +685,8 @@ class SettingsWindow:
                 sample = probe_connection(self._current_llm(include_prompts=False), timeout=8)
             except Exception as exc:
                 error = sanitize_error(str(exc), self.api_key.get().strip())
+                if self.provider.get() == PROVIDER_GOOGLE:
+                    error = friendly_key_error(error)
             def done() -> None:
                 if error:
                     self._tested_ok = False
@@ -582,30 +699,6 @@ class SettingsWindow:
             self.root.after(0, done)
 
         threading.Thread(target=work, name="tinyfix-llm-test", daemon=True).start()
-
-    def _build_prompts(self) -> None:
-        tab = self._tab("Prompts")
-        tab.columnconfigure(0, weight=1)
-        ttk.Label(
-            tab,
-            text="Each skill has its own prompt on the Skills tab. Use {{content}} for the selected text (if you omit it, the text is added at the end). Skills may also use {{language}}.",
-            wraplength=640,
-        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
-        lang_row = ttk.Frame(tab)
-        lang_row.grid(row=1, column=0, sticky="w")
-        ttk.Label(lang_row, text="Target language for {{language}}").pack(side="left")
-        ttk.Combobox(
-            lang_row,
-            textvariable=self.target_language,
-            values=TARGET_LANGUAGE_CHOICES,
-            width=22,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Label(
-            tab,
-            text="This language is substituted wherever a skill prompt contains {{language}}, including Translate.",
-            foreground="#555555",
-            wraplength=640,
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
     def _reset_text(self, widget: tk.Text, value: str) -> None:
         widget.delete("1.0", "end")
@@ -631,7 +724,7 @@ class SettingsWindow:
         ttk.Label(tab, text="Correct English typos from any Windows app, offline by default.", wraplength=640).grid(
             row=1, column=0, sticky="w", pady=(8, 0)
         )
-        ttk.Label(tab, text="The built-in model is paperweight/tinyfix by Chris Ahlgren, bundled at build time. Optional online correction is yours to enable and never required.", wraplength=640).grid(
+        ttk.Label(tab, text="The optional offline pack uses the paperweight/tinyfix model by Chris Ahlgren. Optional online correction is yours to enable and never required.", wraplength=640).grid(
             row=2, column=0, sticky="w", pady=(8, 0)
         )
         link = ttk.Label(tab, text=GITHUB_URL, foreground="#0b57d0", cursor="hand2")
@@ -641,411 +734,80 @@ class SettingsWindow:
             row=4, column=0, sticky="w", pady=(16, 0)
         )
 
-    def _skill_by_id(self, skill_id: str) -> Skill | None:
-        for skill in self.skills:
-            if skill.id == skill_id:
-                return skill
-        return None
-
-    def _init_builtin_row_vars(self, skill: Skill | None) -> tuple[tk.BooleanVar, tk.BooleanVar, tk.StringVar]:
-        skill_enabled = tk.BooleanVar(value=bool(skill and skill.enabled))
-        hotkey = skill.hotkey_obj() if skill else disabled_hotkey()
-        hk_enabled = tk.BooleanVar(value=not hotkey.is_disabled)
-        key = tk.StringVar(value=_format_hotkey(hotkey))
-        return skill_enabled, hk_enabled, key
-
-    def _sync_builtin_rows_from_skill(self, skill: Skill) -> None:
-        hotkey = skill.hotkey_obj()
-        hk_on = not hotkey.is_disabled
-        key_text = _format_hotkey(hotkey)
-        rows: dict[str, tuple[tk.BooleanVar, tk.BooleanVar, tk.StringVar]] = {
-            SKILL_FIX: (self.fix_skill_enabled, self.sel_enabled, self.sel_key),
-            SKILL_FIX_ALL: (self.all_skill_enabled, self.all_enabled, self.all_key),
-            SKILL_TRANSLATE: (self.tr_skill_enabled, self.tr_enabled, self.tr_key),
-            SKILL_REWRITE: (self.rew_skill_enabled, self.rew_hk_enabled, self.rew_key),
-            SKILL_REWRITE_LANGUAGE: (self.rewl_skill_enabled, self.rewl_hk_enabled, self.rewl_key),
-        }
-        entry = rows.get(skill.id)
-        if entry is None:
-            return
-        skill_en, hk_en, key_var = entry
-        skill_en.set(bool(skill.enabled))
-        hk_en.set(hk_on)
-        key_var.set(key_text)
-
-    def _builtin_row(
-        self,
-        parent: ttk.Frame,
-        row: int,
-        title: str,
-        skill_enabled: tk.BooleanVar,
-        hk_enabled: tk.BooleanVar,
-        key_var: tk.StringVar,
-    ) -> None:
-        ttk.Label(parent, text=title, width=26).grid(row=row, column=0, sticky="w", pady=3)
-        ttk.Checkbutton(parent, text="Enabled", variable=skill_enabled).grid(row=row, column=1, sticky="w", padx=(4, 8))
-        hot = ttk.Frame(parent)
-        hot.grid(row=row, column=2, sticky="ew")
-        hot.columnconfigure(0, weight=1)
-        ttk.Entry(hot, textvariable=key_var, state="readonly", width=24).grid(row=0, column=0, sticky="ew")
-        ttk.Button(hot, text="Record", command=lambda: self._start_record(key_var, hk_enabled)).grid(row=0, column=1, padx=(6, 0))
-        ttk.Button(hot, text="Disable", command=lambda: self._disable_row(key_var, hk_enabled)).grid(row=0, column=2, padx=(6, 0))
-
     def _build_skills(self) -> None:
         tab = self._tab("Skills")
-        tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(3, weight=1)
-
-        ttk.Label(
+        tab.rowconfigure(0, weight=1)
+        menu = self.data.skill_menu_hotkey
+        self.skills_page = SkillsPage(
             tab,
-            text="Create as many skills as you like. Each one can have its own shortcut, prompt, and input mode. Built-in skills include Fix, Translate, and optional Rewrite skills (Rewrite needs an online model).",
-            wraplength=680,
-        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
-
-        fix = self._skill_by_id(SKILL_FIX)
-        fix_all = self._skill_by_id(SKILL_FIX_ALL)
-        translate = self._skill_by_id(SKILL_TRANSLATE)
-        rewrite = self._skill_by_id(SKILL_REWRITE)
-        rewrite_lang = self._skill_by_id(SKILL_REWRITE_LANGUAGE)
-        self.fix_skill_enabled = tk.BooleanVar(value=bool(fix and fix.enabled))
-        self.all_skill_enabled = tk.BooleanVar(value=bool(fix_all and fix_all.enabled))
-        self.tr_skill_enabled = tk.BooleanVar(value=bool(translate and translate.enabled))
-        self.rew_skill_enabled, self.rew_hk_enabled, self.rew_key = self._init_builtin_row_vars(rewrite)
-        self.rewl_skill_enabled, self.rewl_hk_enabled, self.rewl_key = self._init_builtin_row_vars(rewrite_lang)
-
-        builtins = ttk.LabelFrame(tab, text="Built-in skills", padding=10)
-        builtins.grid(row=1, column=0, sticky="ew", pady=(0, 8))
-        builtins.columnconfigure(2, weight=1)
-        self._builtin_row(builtins, 0, "Fix", self.fix_skill_enabled, self.sel_enabled, self.sel_key)
-        self._builtin_row(builtins, 1, "Fix all", self.all_skill_enabled, self.all_enabled, self.all_key)
-        self._builtin_row(builtins, 2, "Translate", self.tr_skill_enabled, self.tr_enabled, self.tr_key)
-        self._builtin_row(builtins, 3, "Rewrite", self.rew_skill_enabled, self.rew_hk_enabled, self.rew_key)
-        self._builtin_row(builtins, 4, "Rewrite to target language", self.rewl_skill_enabled, self.rewl_hk_enabled, self.rewl_key)
-
-        lang_box = ttk.Frame(tab)
-        lang_box.grid(row=2, column=0, sticky="w", pady=(0, 8))
-        lang_row = ttk.Frame(lang_box)
-        lang_row.pack(anchor="w")
-        ttk.Label(lang_row, text="Target language for {{language}}").pack(side="left")
-        ttk.Combobox(
-            lang_row,
-            textvariable=self.target_language,
-            values=TARGET_LANGUAGE_CHOICES,
-            width=22,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Label(
-            lang_box,
-            text="Used by Translate and Rewrite to target language. You can type a language that is not in the list.",
-            foreground="#555555",
-            wraplength=680,
-        ).pack(anchor="w", pady=(4, 0))
-
-        body = ttk.Frame(tab)
-        body.grid(row=3, column=0, sticky="nsew")
-        body.columnconfigure(1, weight=1)
-        body.rowconfigure(0, weight=1)
-
-        left = ttk.Frame(body)
-        left.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
-        left.rowconfigure(0, weight=1)
-        self.skill_list = tk.Listbox(left, height=14, exportselection=False, width=28)
-        self.skill_list.grid(row=0, column=0, sticky="nsw")
-        self.skill_list.bind("<<ListboxSelect>>", self._on_skill_select)
-        buttons = ttk.Frame(left)
-        buttons.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(buttons, text="Add", command=self._add_skill).pack(fill="x")
-        ttk.Button(buttons, text="Duplicate", command=self._duplicate_skill).pack(fill="x", pady=(4, 0))
-        ttk.Button(buttons, text="Delete", command=self._delete_skill).pack(fill="x", pady=(4, 0))
-        ttk.Button(buttons, text="Move up", command=lambda: self._move_skill(-1)).pack(fill="x", pady=(4, 0))
-        ttk.Button(buttons, text="Move down", command=lambda: self._move_skill(1)).pack(fill="x", pady=(4, 0))
-
-        editor = ttk.LabelFrame(body, text="Skill", padding=10)
-        editor.grid(row=0, column=1, sticky="nsew")
-        editor.columnconfigure(1, weight=1)
-        editor.rowconfigure(5, weight=1)
-
-        self.skill_name = tk.StringVar()
-        self.skill_enabled = tk.BooleanVar(value=True)
-        self.skill_mode = tk.StringVar(value=INPUT_SELECTION)
-        self.skill_hotkey = tk.StringVar(value=DISABLED_LABEL)
-        self.skill_hotkey_enabled = tk.BooleanVar(value=False)
-        self.skill_status = tk.StringVar(value="")
-
-        ttk.Label(editor, text="Name").grid(row=0, column=0, sticky="w")
-        ttk.Entry(editor, textvariable=self.skill_name).grid(row=0, column=1, sticky="ew", padx=8)
-        ttk.Checkbutton(editor, text="Enabled", variable=self.skill_enabled).grid(row=0, column=2, sticky="w")
-
-        ttk.Label(editor, text="Input").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        modes = ttk.Frame(editor)
-        modes.grid(row=1, column=1, columnspan=2, sticky="w", padx=8, pady=(8, 0))
-        ttk.Radiobutton(modes, text="Use the current selection", value=INPUT_SELECTION, variable=self.skill_mode).pack(side="left")
-        ttk.Radiobutton(modes, text="Select the whole field first", value=INPUT_SELECT_ALL, variable=self.skill_mode).pack(side="left", padx=(12, 0))
-
-        ttk.Label(editor, text="Shortcut").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        hot = ttk.Frame(editor)
-        hot.grid(row=2, column=1, columnspan=2, sticky="ew", padx=8, pady=(8, 0))
-        ttk.Entry(hot, textvariable=self.skill_hotkey, state="readonly", width=28).pack(side="left", fill="x", expand=True)
-        ttk.Button(hot, text="Record", command=lambda: self._start_record(self.skill_hotkey, self.skill_hotkey_enabled)).pack(side="left", padx=(8, 0))
-        ttk.Button(hot, text="Disable", command=lambda: self._disable_row(self.skill_hotkey, self.skill_hotkey_enabled)).pack(side="left", padx=(8, 0))
-
-        ttk.Label(editor, text="Prompt  (use {{content}} and optionally {{language}})").grid(row=3, column=0, columnspan=3, sticky="w", pady=(12, 4))
-        self.skill_prompt = tk.Text(editor, height=10, wrap="word", undo=True)
-        self.skill_prompt.grid(row=5, column=0, columnspan=3, sticky="nsew")
-
-        actions = ttk.Frame(editor)
-        actions.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(8, 0))
-        ttk.Button(actions, text="Reset prompt to default", command=self._reset_skill_prompt).pack(side="left")
-        ttk.Button(actions, text="Test on sample text", command=self._test_skill).pack(side="left", padx=(8, 0))
-        ttk.Label(editor, textvariable=self.skill_status, foreground="#555555", wraplength=420).grid(
-            row=7, column=0, columnspan=3, sticky="w", pady=(8, 0)
+            self.data.skills or default_skills(),
+            "none" if menu.is_disabled else menu.display,
+            self.data.dismissed_skills,
+            self.target_language,
+            TARGET_LANGUAGE_CHOICES,
+            SkillsPageHooks(record_active=self.hooks.on_recording, test_skill=self.hooks.on_test_skill),
         )
+        self.skills_page.grid(row=0, column=0, sticky="nsew")
 
-        self._selected_skill_index = 0
-        self._skill_loading = False
-        self._refresh_skill_list(select=0)
-
-    def _skill_label(self, skill: Skill) -> str:
-        mark = "" if skill.enabled else " (off)"
-        builtin = " •" if skill.builtin else ""
-        return f"{skill.name}{builtin}{mark}"
-
-    def _refresh_skill_list(self, select: int | None = None) -> None:
-        if select is None:
-            select = self._selected_skill_index
-        self.skill_list.delete(0, "end")
-        for skill in self.skills:
-            self.skill_list.insert("end", self._skill_label(skill))
-        if not self.skills:
-            return
-        select = max(0, min(int(select), len(self.skills) - 1))
-        self.skill_list.selection_clear(0, "end")
-        self.skill_list.selection_set(select)
-        self.skill_list.activate(select)
-        self.skill_list.see(select)
-        self._selected_skill_index = select
-        self._load_skill_editor(select)
-
-    def _flush_skill_editor(self) -> None:
-        if not getattr(self, "skills", None) or getattr(self, "_skill_loading", False):
-            return
-        index = getattr(self, "_selected_skill_index", 0)
-        if index < 0 or index >= len(self.skills):
-            return
-        skill = self.skills[index]
-        skill.name = (self.skill_name.get() or "").strip() or skill.name or "New skill"
-        skill.enabled = bool(self.skill_enabled.get())
-        skill.input_mode = self.skill_mode.get() or INPUT_SELECTION
-        skill.hotkey = "none" if not self.skill_hotkey_enabled.get() else (
-            "none" if self.skill_hotkey.get() in (DISABLED_LABEL, "", "None") else self.skill_hotkey.get()
-        )
-        skill.prompt = self.skill_prompt.get("1.0", "end").rstrip("\n") + "\n"
-        if skill.id in (SKILL_FIX, SKILL_FIX_ALL):
-            skill.offline_fallback = True
-
-    def _load_skill_editor(self, index: int) -> None:
-        if index < 0 or index >= len(self.skills):
-            return
-        self._skill_loading = True
-        skill = self.skills[index]
-        self._selected_skill_index = index
-        self.skill_name.set(skill.name)
-        self.skill_enabled.set(bool(skill.enabled))
-        self.skill_mode.set(skill.input_mode)
-        hotkey = skill.hotkey_obj()
-        self.skill_hotkey_enabled.set(not hotkey.is_disabled)
-        self.skill_hotkey.set(_format_hotkey(hotkey))
-        self.skill_prompt.delete("1.0", "end")
-        self.skill_prompt.insert("1.0", (skill.prompt or "").rstrip() + "\n")
-        if skill.builtin:
-            self.skill_status.set("Built-in skill. You can edit it or turn it off, but you cannot delete it.")
-        elif skill.needs_ai:
-            self.skill_status.set("This skill needs an online model. It stays inactive until one is enabled.")
-        else:
-            self.skill_status.set("")
-        self._skill_loading = False
-
-    def _on_skill_select(self, _event=None) -> None:
-        selection = self.skill_list.curselection()
-        if not selection:
-            return
-        index = int(selection[0])
-        if index == self._selected_skill_index:
-            return
-        self._flush_skill_editor()
-        self._refresh_skill_list(select=index)
-
-    def _add_skill(self) -> None:
-        self._flush_skill_editor()
-        self.skills.append(new_custom_skill())
-        self._refresh_skill_list(select=len(self.skills) - 1)
-        self.skill_status.set("New skill added. Give it a name, a prompt, and optionally a shortcut.")
-
-    def _duplicate_skill(self) -> None:
-        self._flush_skill_editor()
-        index = self._selected_skill_index
-        if index < 0 or index >= len(self.skills):
-            return
-        self.skills.insert(index + 1, duplicate_skill(self.skills[index]))
-        self._refresh_skill_list(select=index + 1)
-
-    def _delete_skill(self) -> None:
-        self._flush_skill_editor()
-        index = self._selected_skill_index
-        if index < 0 or index >= len(self.skills):
-            return
-        skill = self.skills[index]
-        if skill.builtin:
-            self.skill_status.set("Built-in skills cannot be deleted. You can disable them or duplicate them.")
-            return
-        del self.skills[index]
-        self._refresh_skill_list(select=min(index, len(self.skills) - 1))
-
-    def _move_skill(self, delta: int) -> None:
-        self._flush_skill_editor()
-        index = self._selected_skill_index
-        target = index + delta
-        if index < 0 or target < 0 or target >= len(self.skills):
-            return
-        self.skills[index], self.skills[target] = self.skills[target], self.skills[index]
-        self._refresh_skill_list(select=target)
-
-    def _reset_skill_prompt(self) -> None:
-        index = self._selected_skill_index
-        if index < 0 or index >= len(self.skills):
-            return
-        skill = self.skills[index]
-        value = default_prompt_for_skill(skill.id)
-        self.skill_prompt.delete("1.0", "end")
-        self.skill_prompt.insert("1.0", value.rstrip() + "\n")
-
-    def _test_skill(self) -> None:
-        self._flush_skill_editor()
-        index = self._selected_skill_index
-        if index < 0 or index >= len(self.skills):
-            return
-        skill = Skill.from_dict(self.skills[index].to_dict())
-        dialog = tk.Toplevel(self.root)
-        dialog.title(f"Test “{skill.name}”")
-        dialog.geometry("520x420+400+200")
-        dialog.transient(self.root)
-        dialog.columnconfigure(0, weight=1)
-        dialog.rowconfigure(1, weight=1)
-        dialog.rowconfigure(3, weight=1)
-        ttk.Label(dialog, text="Sample text").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
-        sample = tk.Text(dialog, height=6, wrap="word")
-        sample.grid(row=1, column=0, sticky="nsew", padx=12)
-        sample.insert("1.0", "Hi frinds how are you?")
-        ttk.Label(dialog, text="Result").grid(row=2, column=0, sticky="w", padx=12, pady=(8, 4))
-        result = tk.Text(dialog, height=8, wrap="word")
-        result.grid(row=3, column=0, sticky="nsew", padx=12)
-        status = tk.StringVar(value="")
-        ttk.Label(dialog, textvariable=status, wraplength=480, foreground="#555555").grid(row=4, column=0, sticky="w", padx=12, pady=8)
-        row = ttk.Frame(dialog)
-        row.grid(row=5, column=0, sticky="e", padx=12, pady=(0, 12))
-
-        def run_test() -> None:
-            text = sample.get("1.0", "end").rstrip("\n")
-            status.set("Running…")
-            result.delete("1.0", "end")
-            hook = self.hooks.on_test_skill
-
-            def work() -> None:
-                error = ""
-                output = ""
-                try:
-                    if hook is None:
-                        raise RuntimeError("Testing is not available in this window.")
-                    output = hook(skill, text) or ""
-                except Exception as exc:
-                    error = str(exc)
-                def done() -> None:
-                    if error:
-                        status.set(error)
-                        return
-                    result.insert("1.0", output)
-                    status.set("Done.")
-                dialog.after(0, done)
-
-            threading.Thread(target=work, name="tinyfix-skill-test", daemon=True).start()
-
-        ttk.Button(row, text="Run test", command=run_test).pack(side="right", padx=(8, 0))
-        ttk.Button(row, text="Close", command=dialog.destroy).pack(side="right")
-        dialog.focus_force()
+    @property
+    def skills(self) -> list[Skill]:
+        return self.skills_page.skills
 
     def _collect(self) -> SettingsData:
-        self._flush_skill_editor()
-        index = getattr(self, "_selected_skill_index", 0)
-        if self.skills and 0 <= index < len(self.skills):
-            selected = self.skills[index]
-            if selected.id in _BUILTIN_SKILL_IDS:
-                self._sync_builtin_rows_from_skill(selected)
-
         llm = self._current_llm(include_prompts=True)
         skills = [Skill.from_dict(skill.to_dict()) for skill in self.skills]
         by_id = {skill.id: skill for skill in skills}
 
-        def _apply_builtin(skill_id: str, skill_enabled: tk.BooleanVar, hk_enabled: tk.BooleanVar, key_var: tk.StringVar, *, default: str) -> None:
+        def hotkey_of(skill_id: str) -> Hotkey:
             skill = by_id.get(skill_id)
-            if skill is None:
-                return
-            skill.enabled = bool(skill_enabled.get())
-            skill.hotkey = _hotkey_spec_from_row(bool(hk_enabled.get()), key_var.get(), default)
+            return skill.hotkey_obj() if skill is not None else disabled_hotkey()
 
-        _apply_builtin(SKILL_FIX, self.fix_skill_enabled, self.sel_enabled, self.sel_key, default=DEFAULT_HOTKEY)
-        _apply_builtin(SKILL_FIX_ALL, self.all_skill_enabled, self.all_enabled, self.all_key, default=DEFAULT_HOTKEY_ALL)
-        _apply_builtin(SKILL_TRANSLATE, self.tr_skill_enabled, self.tr_enabled, self.tr_key, default=DEFAULT_HOTKEY_TRANSLATE)
-        _apply_builtin(SKILL_REWRITE, self.rew_skill_enabled, self.rew_hk_enabled, self.rew_key, default="none")
-        _apply_builtin(SKILL_REWRITE_LANGUAGE, self.rewl_skill_enabled, self.rewl_hk_enabled, self.rewl_key, default="none")
-
-        if SKILL_TRANSLATE in by_id:
-            by_id[SKILL_TRANSLATE].input_mode = (
-                INPUT_SELECT_ALL if self.translate_select_all.get() else INPUT_SELECTION
-            )
-            by_id[SKILL_TRANSLATE].prompt = llm.translate_prompt or by_id[SKILL_TRANSLATE].prompt
-        if SKILL_FIX in by_id:
-            by_id[SKILL_FIX].prompt = llm.fix_prompt or by_id[SKILL_FIX].prompt
-        menu = _hotkey_from_row(self.menu_enabled.get(), self.menu_key.get(), DEFAULT_HOTKEY_MENU)
+        translate = by_id.get(SKILL_TRANSLATE)
         return SettingsData(
             version=self.data.version,
-            hotkey=_hotkey_from_row(self.sel_enabled.get(), self.sel_key.get(), DEFAULT_HOTKEY),
-            hotkey_all=_hotkey_from_row(self.all_enabled.get(), self.all_key.get(), DEFAULT_HOTKEY_ALL),
-            hotkey_translate=_hotkey_from_row(self.tr_enabled.get(), self.tr_key.get(), DEFAULT_HOTKEY_TRANSLATE),
-            translate_select_all=bool(self.translate_select_all.get()),
+            hotkey=hotkey_of(SKILL_FIX),
+            hotkey_all=hotkey_of(SKILL_FIX_ALL),
+            hotkey_translate=hotkey_of(SKILL_TRANSLATE),
+            translate_select_all=bool(translate and translate.select_all),
             sensitivity=self.sensitivity.get(),
             llm=llm,
             last_update_check=self.data.last_update_check,
             skills=skills,
-            skill_menu_hotkey=menu,
+            skill_menu_hotkey=parse_skill_hotkey(self.skills_page.menu_hotkey),
+            dismissed_skills=list(self.skills_page.dismissed),
         )
+
+    def _show_skills_problem(self, message: str) -> None:
+        self.skills_page.set_message(message)
+        try:
+            self.notebook.select(0)
+        except tk.TclError:
+            pass
 
     def _apply(self) -> bool:
         logging.info("Settings apply requested")
+        if not self.skills_page.finish_editing():
+            self.notebook.select(0)
+            return False
         try:
             data = self._collect()
         except Exception:
             logging.exception("Settings could not be collected")
-            self.record_status.set("Could not save settings. See tinyfix.log for details.")
+            self._show_skills_problem("Could not save settings. See tinyfix.log for details.")
             return False
         conflicts = find_conflicts(data.skills, data.skill_menu_hotkey)
         if conflicts:
             message = "Shortcut conflict: " + "; ".join(item.describe() for item in conflicts[:3])
             logging.info("Settings apply blocked: %s", message)
-            if hasattr(self, "skill_status"):
-                self.skill_status.set(message)
-            self.record_status.set(message)
-            try:
-                self.notebook.select(1)
-            except tk.TclError:
-                self.notebook.select(0)
+            self._show_skills_problem(message)
             return False
         try:
             self.hooks.on_apply(data)
         except Exception:
             logging.exception("Settings apply callback failed")
-            self.record_status.set("Could not save settings. See tinyfix.log for details.")
+            self._show_skills_problem("Could not save settings. See tinyfix.log for details.")
             return False
         self.data = data
-        self.skills = [Skill.from_dict(skill.to_dict()) for skill in data.skills]
         logging.info("Settings apply finished")
         return True
 
@@ -1059,6 +821,7 @@ class SettingsWindow:
         self._close()
 
     def _close(self) -> None:
+        self._closed = True
         global _open_window
         try:
             self.root.destroy()
@@ -1090,3 +853,103 @@ def open_settings(data: SettingsData, hooks: SettingsHooks, master: tk.Misc | No
         window.root.mainloop()
         _open_window = None
     logging.info("Settings window is ready")
+
+
+def open_pack_offer(info: dict, hooks: SettingsHooks, master: tk.Misc, on_decline: Callable[[], None] | None = None) -> tk.Toplevel:
+    """First-run question: download the optional offline pack now, or keep the basic offline fixes."""
+    win = tk.Toplevel(master)
+    win.title("TinyFix — smarter offline fixes?")
+    win.resizable(False, False)
+    _apply_theme(win)
+    state = {"busy": False, "closed": False}
+    frame = ttk.Frame(win, padding=18)
+    frame.grid(sticky="nsew")
+    ttk.Label(frame, text="Want smarter offline fixes?", font=("Segoe UI", 13, "bold")).grid(sticky="w")
+    ttk.Label(
+        frame,
+        text="TinyFix already fixes spelling offline. The optional offline pack also understands context, "
+        "such as their / they’re. It is a separate download, and you can turn it off or remove it later in Settings.",
+        wraplength=420,
+        justify="left",
+    ).grid(sticky="w", pady=(8, 8))
+    ttk.Label(frame, text=SettingsWindow._pack_size_text(info), foreground="#555555", wraplength=420).grid(sticky="w")
+    status = tk.StringVar(value="")
+    ttk.Label(frame, textvariable=status, wraplength=420).grid(sticky="w", pady=(10, 4))
+    bar = ttk.Progressbar(frame, mode="determinate", maximum=100, length=420)
+    bar.grid(sticky="ew")
+    bar.grid_remove()
+    buttons = ttk.Frame(frame)
+    buttons.grid(sticky="e", pady=(14, 0))
+    later = ttk.Button(buttons, text="Not now")
+    later.pack(side="right", padx=(8, 0))
+    go = ttk.Button(buttons, text=f"Download ({info.get('download_mb', 25)} MB)")
+    go.pack(side="right")
+
+    def alive(fn):
+        def guarded():
+            if not state["closed"]:
+                try:
+                    fn()
+                except tk.TclError:
+                    pass
+
+        try:
+            win.after(0, guarded)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def close() -> None:
+        state["closed"] = True
+        try:
+            win.destroy()
+        except tk.TclError:
+            pass
+
+    def decline() -> None:
+        if state["busy"] and hooks.pack_cancel:
+            hooks.pack_cancel()
+        if on_decline and not state["busy"]:
+            on_decline()
+        close()
+
+    def start() -> None:
+        if state["busy"] or not hooks.pack_download:
+            return
+        state["busy"] = True
+        go.configure(state="disabled")
+        later.configure(text="Cancel")
+        bar.grid()
+        status.set("Downloading…")
+
+        def progress(done: int, total: int) -> None:
+            percent = 100 * done / total if total else 0
+            alive(lambda: (bar.configure(value=percent), status.set(f"Downloading… {percent:.0f}%")))
+
+        def finished(error: str | None) -> None:
+            def ui() -> None:
+                state["busy"] = False
+                if error:
+                    status.set(error)
+                    go.configure(state="normal", text="Try again")
+                    later.configure(text="Not now")
+                    bar.grid_remove()
+                else:
+                    status.set("Done. Smarter offline fixes are on.")
+                    win.after(1500, close)
+
+            alive(ui)
+
+        hooks.pack_download(progress, finished)
+
+    go.configure(command=start)
+    later.configure(command=decline)
+    win.protocol("WM_DELETE_WINDOW", decline)
+    try:
+        # Come to the front once so the question is not hidden behind other apps, then behave normally.
+        win.attributes("-topmost", True)
+        win.after(600, lambda: win.attributes("-topmost", False) if win.winfo_exists() else None)
+        win.lift()
+        win.focus_force()
+    except tk.TclError:
+        pass
+    return win

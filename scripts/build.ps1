@@ -94,3 +94,20 @@ if (-not (Test-Path $Setup)) { throw "Installer was not produced: $Setup" }
 Write-Host "Build finished: $Setup"
 Get-Item $Setup | Format-List FullName, Length, LastWriteTime
 
+# The optional offline pack (numpy + onnxruntime + model) is a separate release asset, built with the
+# same Python as the exe because the compiled parts must match. It is published once to the
+# "offline-pack" release and is not rebuilt for every app version.
+Write-Host '==> Building the optional offline pack'
+& $VenvPython (Join-Path $PSScriptRoot 'build_pack.py') --out (Join-Path $Dist 'pack')
+if ($LASTEXITCODE -ne 0) { throw 'Offline pack build failed' }
+
+Write-Host '==> Writing SHA256 checksums'
+$Hashes = @()
+$ToHash = @($Setup) + @(Get-ChildItem (Join-Path $Dist 'pack') -Filter *.zip | ForEach-Object { $_.FullName })
+foreach ($file in $ToHash) {
+    $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLower()
+    $Hashes += "$h  $(Split-Path -Leaf $file)"
+}
+$Hashes | Set-Content -Encoding ascii (Join-Path $Dist 'SHA256SUMS.txt')
+$Hashes
+

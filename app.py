@@ -16,6 +16,14 @@ import traceback
 from ctypes import wintypes
 from pathlib import Path
 
+# numpy's OpenBLAS reserves ~600 MB of virtual memory per process at import time
+# (one buffer per CPU thread). TinyFix only does tiny matrix work, so one thread
+# is enough. This must be set before numpy or onnxruntime is imported.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+import offline_pack
+import tray
 from hotkey_util import (
     DEFAULT_HOTKEY,
     DEFAULT_HOTKEY_ALL,
@@ -56,8 +64,8 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.4.0"
-MUTEX_NAME = "Local\\TinyFixHotkey"
+APP_VERSION = "1.5.0"
+MUTEX_NAME = "Local\\TinyFixHotkey" + os.environ.get("TINYFIX_MUTEX_SUFFIX", "")  # the suffix is for tests only
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
 HOTKEY_ALL_ID = 2
@@ -69,6 +77,8 @@ WM_QUIT = 0x0012
 WM_APP_RELOAD = 0x8001
 WM_APP_PAUSE = 0x8002
 WM_APP_RESUME = 0x8003
+WM_APP_RECORD_ON = 0x8004  # a shortcut is being chosen: our own global shortcuts must not fire
+WM_APP_RECORD_OFF = 0x8005
 VK_CONTROL = 0x11
 VK_SHIFT = 0x10
 VK_MENU = 0x12
@@ -258,7 +268,36 @@ engine = None
 mutex_handle = None
 hotkey_thread_id = None
 hotkey_thread = None
-busy = threading.Lock()
+class WorkLock:
+    """The one-job-at-a-time lock for work on the user's text. While it is held the tray icon shows it is working."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+
+    def acquire(self, blocking: bool = True) -> bool:
+        got = self._lock.acquire(blocking)
+        if got:
+            _show_working(True)
+        return got
+
+    def release(self) -> None:
+        self._lock.release()
+        _show_working(False)
+
+    def locked(self) -> bool:
+        return self._lock.locked()
+
+
+def _show_working(working: bool) -> None:
+    icon = tray_icon
+    if icon is not None:
+        try:
+            icon.set_busy(working)
+        except Exception:
+            logging.exception("Could not update the tray icon")
+
+
+busy = WorkLock()
 stop_event = threading.Event()
 paused = threading.Event()
 hotkey_ready = threading.Event()
@@ -314,6 +353,56 @@ def acquire_mutex() -> bool:
     if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
         return False
     return mutex_handle is not None
+
+
+OPEN_EVENT_NAME = MUTEX_NAME + "OpenSettings"
+open_event_handle = None
+
+kernel32.CreateEventW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.CreateEventW.restype = wintypes.HANDLE
+kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.OpenEventW.restype = wintypes.HANDLE
+kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+kernel32.WaitForSingleObject.restype = wintypes.DWORD
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+user32.AllowSetForegroundWindow.argtypes = [wintypes.DWORD]
+EVENT_MODIFY_STATE = 0x0002
+ASFW_ANY = 0xFFFFFFFF
+WAIT_OBJECT_0 = 0
+
+
+def create_open_event() -> bool:
+    """The running TinyFix listens on this event; starting TinyFix again sets it to open Settings."""
+    global open_event_handle
+    open_event_handle = kernel32.CreateEventW(None, False, False, OPEN_EVENT_NAME)  # auto-reset: an early signal is kept
+    return bool(open_event_handle)
+
+
+def signal_running_instance() -> bool:
+    """Called by a second launch: ask the TinyFix that is already running to open Settings."""
+    try:
+        user32.AllowSetForegroundWindow(ASFW_ANY)  # lets the running copy bring its window to the front
+        handle = kernel32.OpenEventW(EVENT_MODIFY_STATE, False, OPEN_EVENT_NAME)
+        if not handle:
+            return False
+        try:
+            return bool(kernel32.SetEvent(handle))
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        logging.exception("Could not signal the running TinyFix")
+        return False
+
+
+def open_event_loop() -> None:
+    """Wait (in short slices, so exit is never blocked) for a second launch and open Settings for it."""
+    while not stop_event.is_set():
+        if open_event_handle and kernel32.WaitForSingleObject(open_event_handle, 500) == WAIT_OBJECT_0:
+            logging.info("TinyFix was started again; opening Settings")
+            queue_ui("open-settings")
+        elif not open_event_handle:
+            return
 
 
 def config_hotkey_value(hotkey: Hotkey) -> str:
@@ -1024,7 +1113,7 @@ def post_to_hotkey_thread(message: int) -> None:
 
 
 def safe_tray_action(fn):
-    """pystray swallows callback exceptions; always log them and tell the user."""
+    """Tray callbacks run on worker threads; always log failures and tell the user."""
 
     def wrapper(*args, **kwargs):
         try:
@@ -1120,6 +1209,8 @@ def _dispatch_ui(action: str, payload: object = None) -> None:
         _open_settings_on_ui_thread()
     elif action == "about":
         _show_about_window()
+    elif action == "pack-offer":
+        _show_pack_offer()
     elif action == "update-available" and isinstance(payload, LatestRelease):
         prompt_update(payload)
     elif action == "update-latest":
@@ -1198,15 +1289,25 @@ def _open_settings_on_ui_thread() -> None:
         last_update_check=_last_update_check_value(),
         skills=[Skill.from_dict(skill.to_dict()) for skill in skill_store.skills],
         skill_menu_hotkey=current_hotkey_menu,
+        dismissed_skills=list(skill_store.dismissed),
     )
     hooks = SettingsHooks(
         on_apply=apply_settings_data,
         on_check_updates=lambda: check_for_updates_menu(),
         on_live_sensitivity=lambda name: apply_sensitivity_setting(name, persist=True),
         on_test_skill=test_skill_text,
+        on_recording=set_hotkeys_recording,
+        **_pack_hook_args(),
     )
     logging.info("Presenting Settings on the UI thread")
     open_settings(data, hooks, master=ui_root)
+
+
+def _show_pack_offer() -> None:
+    from settings_ui import open_pack_offer
+
+    hooks = SettingsHooks(on_apply=lambda _data: None, **_pack_hook_args())
+    open_pack_offer(pack_info(), hooks, ui_root)
 
 
 def _show_about_window() -> None:
@@ -1324,6 +1425,17 @@ def hotkey_loop() -> None:
             else:
                 hotkey_failed.set()
                 queue_ui("change-failed")
+        elif msg.message == WM_APP_RECORD_ON:
+            unregister_current_hotkeys()
+            logging.info("Shortcuts released while a new one is chosen")
+        elif msg.message == WM_APP_RECORD_OFF:
+            if not paused.is_set():
+                if register_current_hotkeys():
+                    hotkey_failed.clear()
+                else:
+                    hotkey_failed.set()
+                    queue_ui("change-failed")
+            logging.info("Shortcuts back on")
         elif msg.message == WM_APP_RELOAD:
             unregister_current_hotkeys()
             paused.clear()
@@ -1389,6 +1501,11 @@ def toggle_pause(_item=None, _icon=None) -> None:
         post_to_hotkey_thread(WM_APP_RESUME)
     else:
         post_to_hotkey_thread(WM_APP_PAUSE)
+
+
+def set_hotkeys_recording(active: bool) -> None:
+    """Called by the shortcut window: while it is open, TinyFix's own shortcuts are released."""
+    post_to_hotkey_thread(WM_APP_RECORD_ON if active else WM_APP_RECORD_OFF)
 
 
 def apply_hotkeys(
@@ -1611,6 +1728,7 @@ def apply_settings_data(data: SettingsData) -> None:
         version=getattr(skill_store, "version", 1),
         skills=[Skill.from_dict(skill.to_dict()) for skill in (data.skills or [])] or list(skill_store.skills),
         skill_menu_hotkey="none" if data.skill_menu_hotkey.is_disabled else data.skill_menu_hotkey.display,
+        dismissed=list(data.dismissed_skills),
     )
     current_hotkey_menu = data.skill_menu_hotkey
     _sync_legacy_from_skills()
@@ -1816,35 +1934,34 @@ def drain_ui_actions() -> None:
         pending_ui.clear()
 
 
-def make_icon():
-    from PIL import Image, ImageDraw
+def working_icon_paths() -> list[Path]:
+    """The three-dot frames the tray cycles through while TinyFix works."""
+    found: list[Path] = []
+    for number in (1, 2, 3):
+        name = f"tinyfix-working-{number}.ico"
+        for base in (RESOURCES, ROOT, ROOT / "assets"):
+            if (base / name).exists():
+                found.append(base / name)
+                break
+    return found
 
-    bundled = RESOURCES / "tinyfix.ico"
-    if not bundled.exists():
-        bundled = ROOT / "tinyfix.ico"
-    if bundled.exists():
-        try:
-            return Image.open(bundled)
-        except Exception:
-            logging.exception("Could not load tray icon file")
-    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((2, 2, 61, 61), radius=14, fill=(18, 92, 68, 255))
-    draw.line((16, 34, 28, 46), fill="white", width=5)
-    draw.line((28, 46, 48, 18), fill="white", width=5)
-    return image
+
+def icon_path() -> Path | None:
+    for base in (RESOURCES, ROOT):
+        candidate = base / "tinyfix.ico"
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _sensitivity_item(name: str):
-    import pystray
-
     def checked(*_args) -> bool:
         return current_sensitivity == name
 
     def choose(*_args) -> None:
         apply_sensitivity_setting(name)
 
-    return pystray.MenuItem(name.capitalize(), choose, checked=checked, radio=True)
+    return tray.MenuItem(name.capitalize(), choose, checked=checked)
 
 
 def tray_title() -> str:
@@ -1853,50 +1970,215 @@ def tray_title() -> str:
     menu = "off" if current_hotkey_menu.is_disabled else current_hotkey_menu.display
     return (
         f"TinyFix v{APP_VERSION} — {sel} fixes selection, {all_} fixes all, "
-        f"{menu} opens skills. Left-click fixes the clipboard."
+        f"{menu} opens skills. Click to open Settings."
     )
 
 
 def setup_tray() -> None:
     global tray_icon
-    import pystray
 
-    menu = pystray.Menu(
-        pystray.MenuItem("Fix clipboard", on_fix_clipboard, default=True),
-        pystray.MenuItem(status_text, None, enabled=False),
-        pystray.MenuItem(pause_label, toggle_pause),
-        pystray.MenuItem("Settings…", open_settings_window),
-        pystray.MenuItem("Change shortcut…", change_shortcut),
-        pystray.MenuItem("Sensitivity", pystray.Menu(*[_sensitivity_item(name) for name in SENSITIVITY_NAMES])),
-        pystray.MenuItem("Check for updates", check_for_updates_menu),
-        pystray.MenuItem("About TinyFix", open_about_window),
-        pystray.MenuItem("Exit", lambda *_: request_stop()),
-    )
-    tray_icon = pystray.Icon(
-        APP_NAME,
-        make_icon(),
-        tray_title(),
-        menu,
-    )
+    menu = [
+        tray.MenuItem("Settings…", open_settings_window, default=True),
+        tray.MenuItem("Fix clipboard", on_fix_clipboard),
+        tray.MenuItem(status_text, None, enabled=False),
+        tray.MenuItem(pause_label, toggle_pause),
+        tray.MenuItem("Change shortcut…", change_shortcut),
+        tray.MenuItem("Sensitivity", submenu=[_sensitivity_item(name) for name in SENSITIVITY_NAMES]),
+        tray.MenuItem("Check for updates", check_for_updates_menu),
+        tray.MenuItem("About TinyFix", open_about_window),
+        tray.MenuItem("Exit", lambda *_: request_stop()),
+    ]
+    tray_icon = tray.TrayIcon(APP_NAME, icon_path(), tray_title(), menu, working_icon_paths=working_icon_paths())
 
-    def setup(icon: pystray.Icon) -> None:
+    def setup(icon: tray.TrayIcon) -> None:
         icon.visible = True
         start_ui_thread()
         drain_ui_actions()
         threading.Thread(target=auto_update_check_worker, name="tinyfix-update", daemon=True).start()
+        maybe_offer_pack()
 
     tray_icon.run(setup=setup)
 
 
+PACK_DIR = offline_pack.pack_root(ROOT)
+# "dictionary" until the offline pack is loaded; the settings window reads this.
+engine_mode = "dictionary"
+engine_note = ""
+
+
+def offline_engine_enabled() -> bool:
+    """User switch for the offline pack (default on, only matters once the pack is installed)."""
+    return _parse_bool(_load_parser().get(CONFIG_SECTION, "offline_engine", fallback="true"), True)
+
+
+def set_offline_engine_enabled(enabled: bool) -> None:
+    parser = _load_parser()
+    parser[CONFIG_SECTION]["offline_engine"] = "true" if enabled else "false"
+    _write_parser(parser)
+
+
 def load_engine():
+    """Load the dictionary engine, plus the offline pack when it is installed and enabled.
+
+    The pack is optional: any problem with it is logged and the dictionary engine is used instead,
+    so starting TinyFix never fails because of the pack.
+    """
+    global engine_mode, engine_note
     from tinyfix_lib import load_tinyfix
 
-    if not (MODELS / "wrong-word.onnx").exists():
-        raise FileNotFoundError(f"TinyFix model files are missing from {MODELS}")
-    logging.info("Loading tinyfix model from %s", MODELS)
-    loaded = load_tinyfix(MODELS, sensitivity=current_sensitivity)
-    logging.info("Model loaded (sensitivity=%s)", loaded.sensitivity)
+    try:
+        offline_pack.apply_pending_removal(PACK_DIR)
+        offline_pack.cleanup_stale(PACK_DIR)
+    except Exception:
+        logging.exception("Could not clean up the offline pack folder")
+    model_path = None
+    engine_note = ""
+    if offline_engine_enabled():
+        if (PACK_DIR / "current").is_dir():
+            try:
+                model_path = offline_pack.activate(PACK_DIR)
+            except offline_pack.PackError as exc:
+                engine_note = str(exc)
+                logging.warning("Offline pack not used: %s", exc)
+        else:
+            engine_note = "Offline pack not installed."
+    else:
+        engine_note = "Offline pack is switched off."
+    if model_path is not None:
+        try:
+            loaded = load_tinyfix(MODELS, sensitivity=current_sensitivity, use_model=True, model_path=model_path)
+            engine_mode = "pack"
+            logging.info("Loaded engine with offline pack (sensitivity=%s)", loaded.sensitivity)
+            return loaded
+        except Exception as exc:
+            engine_note = f"The offline pack could not start ({exc.__class__.__name__})."
+            logging.exception("Offline pack failed to load; using the dictionary engine")
+    engine_mode = "dictionary"
+    loaded = load_tinyfix(MODELS, sensitivity=current_sensitivity, use_model=False)
+    logging.info("Loaded dictionary engine (sensitivity=%s)", loaded.sensitivity)
     return loaded
+
+
+_pack_cancel = threading.Event()
+_engine_lock = threading.Lock()
+
+
+def pack_info() -> dict:
+    """Everything the Settings tab and the first-run offer need, in one cheap, UI-safe call."""
+    status = offline_pack.status(PACK_DIR, active=engine_mode == "pack")
+    disk_mb = round(status.size_bytes / (1024 * 1024)) if status.size_bytes else offline_pack.APPROX_DISK_MB
+    return {
+        "installed": status.installed,
+        "compatible": status.compatible,
+        "active": engine_mode == "pack",
+        "enabled": offline_engine_enabled(),
+        "reason": status.reason,
+        "removal_pending": offline_pack.removal_pending(PACK_DIR),
+        "note": engine_note,
+        "download_mb": offline_pack.APPROX_DOWNLOAD_MB,
+        "disk_mb": disk_mb,
+        "ram_mb": offline_pack.APPROX_RAM_MB,
+    }
+
+
+def reload_engine() -> None:
+    """Rebuild the engine (with or without the pack) and swap it in. Blocking: call from a worker thread."""
+    global engine
+    with _engine_lock:
+        engine = load_engine()
+
+
+def pack_download_async(progress, done) -> None:
+    _pack_cancel.clear()
+
+    def work() -> None:
+        error = None
+        try:
+            offline_pack.download_pack(PACK_DIR, progress=progress, cancel=_pack_cancel)
+            set_offline_engine_enabled(True)
+            reload_engine()
+            if engine_mode != "pack":
+                error = engine_note or "The pack was installed but could not start."
+        except offline_pack.PackError as exc:
+            error = str(exc)
+        except Exception:
+            logging.exception("Offline pack download failed")
+            error = "Something went wrong. See tinyfix.log for details."
+        done(error)
+
+    threading.Thread(target=work, name="tinyfix-pack-download", daemon=True).start()
+
+
+def pack_cancel() -> None:
+    _pack_cancel.set()
+
+
+def pack_set_enabled_async(enabled: bool, done) -> None:
+    def work() -> None:
+        error = None
+        try:
+            set_offline_engine_enabled(enabled)
+            reload_engine()
+            if enabled and engine_mode != "pack":
+                error = engine_note or "The pack could not be turned on."
+        except Exception:
+            logging.exception("Could not switch the offline pack")
+            error = "Something went wrong. See tinyfix.log for details."
+        done(error)
+
+    threading.Thread(target=work, name="tinyfix-pack-toggle", daemon=True).start()
+
+
+def pack_remove() -> str:
+    """Delete the pack. A loaded pack cannot be deleted on Windows, so that case waits for the next start."""
+    _pack_cancel.set()
+    was_active = offline_pack.is_active()
+    try:
+        part = PACK_DIR / ".download.part"
+        part.unlink(missing_ok=True)
+    except OSError:
+        pass
+    if was_active:
+        offline_pack.request_removal(PACK_DIR)
+        set_offline_engine_enabled(False)
+        threading.Thread(target=reload_engine, name="tinyfix-pack-unload", daemon=True).start()
+        return "TinyFix will delete the pack files the next time it starts. Basic fixes are on now."
+    try:
+        import shutil
+
+        shutil.rmtree(PACK_DIR / "current", ignore_errors=False)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        offline_pack.request_removal(PACK_DIR)
+        return "Some files are in use. TinyFix will finish removing them the next time it starts."
+    return "The pack was removed."
+
+
+def _pack_hook_args() -> dict:
+    return {
+        "pack_info": pack_info,
+        "pack_download": pack_download_async,
+        "pack_cancel": pack_cancel,
+        "pack_set_enabled": pack_set_enabled_async,
+        "pack_remove": pack_remove,
+    }
+
+
+def maybe_offer_pack() -> None:
+    """Ask once, on the first start without the pack, whether to download it."""
+    try:
+        parser = _load_parser()
+        if _parse_bool(parser.get(CONFIG_SECTION, "pack_offer_shown", fallback="false")):
+            return
+        info = pack_info()
+        if info["installed"] or info["removal_pending"]:
+            return
+        parser[CONFIG_SECTION]["pack_offer_shown"] = "true"
+        _write_parser(parser)
+        queue_ui("pack-offer")
+    except Exception:
+        logging.exception("Could not offer the offline pack")
 
 
 def _attach_console() -> None:
@@ -2014,8 +2296,10 @@ def main(argv: list[str] | None = None) -> int:
     (ROOT / "cache" / "tmp").mkdir(parents=True, exist_ok=True)
     setup_logging()
     if not acquire_mutex():
-        logging.info("TinyFix is already running")
+        logging.info("TinyFix is already running; asking it to open Settings")
+        signal_running_instance()
         return 0
+    create_open_event()
     write_pid()
     atexit.register(clear_pid)
     try:
@@ -2026,6 +2310,7 @@ def main(argv: list[str] | None = None) -> int:
         hotkey_thread.start()
         if not hotkey_ready.wait(timeout=5):
             logging.warning("Hotkey thread did not become ready")
+        threading.Thread(target=open_event_loop, name="tinyfix-open-event", daemon=True).start()
         setup_tray()
         request_stop()
         if hotkey_thread.is_alive():
