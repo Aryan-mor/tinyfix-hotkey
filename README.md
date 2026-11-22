@@ -4,6 +4,18 @@
 
 Fix English typos in any Windows app: select text, press your shortcut, done.
 
+## Features
+
+- **Fix in place.** Select text, press a shortcut, and the corrected text replaces it. No copy and paste, no browser tab.
+- **Fix the whole field.** One shortcut selects everything in the current text box, fixes it, and pastes it back.
+- **Works offline.** A small built-in engine fixes English typos with no internet, no account, and no API key. An optional offline pack adds context-aware fixes.
+- **Any language with online AI.** Turn on an online model and Fix works in Persian, German, Japanese, and more, in the text's own language.
+- **Keeps your voice.** Meaning, tone, formatting, and line breaks stay as written. No filler phrases and no em dashes.
+- **Translate, Rewrite, Improve prompt.** Optional online skills for the jobs a spell checker cannot do.
+- **Your own skills.** Add skills with a name, shortcut, input mode, and prompt, and open them from the skill menu.
+- **Your choice of model.** Google, OpenRouter, or another provider, with a fallback model. Keys are stored encrypted with Windows DPAPI.
+- **Quiet.** Lives in the system tray, with a Settings window and one-click updates.
+
 ## Install
 
 1. Download **TinyFix-Setup.exe** from the [latest release](https://github.com/Aryan-mor/tinyfix-hotkey/releases/latest).
@@ -11,7 +23,7 @@ Fix English typos in any Windows app: select text, press your shortcut, done.
 3. Pick shortcuts for **Fix selection** (default **Ctrl+Alt+Space**) and **Fix all** (default **Ctrl+F3**). Either shortcut can be set to **None/Disabled**. You can also start TinyFix with Windows.
 4. Click **Finish**. TinyFix sits in the system tray and is ready to use.
 
-No administrator account is required. The setup is per-user and includes the Python runtime and the dictionary engine — nothing else is downloaded at install time. The setup is small (about 40 MB installed). The smarter, context-aware **offline pack** is optional and is not part of it; see below. Online AI is off until you choose it in Settings.
+No administrator account is required. The setup is per-user and includes the Python runtime and the dictionary engine. Nothing else is downloaded at install time. The setup is small (about 40 MB installed). The smarter, context-aware **offline pack** is optional and is not part of it; see below. Online AI is off until you choose it in Settings.
 
 TinyFix is not code-signed (a certificate costs money), so Windows SmartScreen or your antivirus may warn about the setup. Each release lists SHA256 checksums in `SHA256SUMS.txt` so you can check the download yourself: `Get-FileHash TinyFix-Setup.exe`.
 
@@ -19,7 +31,7 @@ TinyFix is not code-signed (a certificate costs money), so Windows SmartScreen o
 
 - Select English text in Chrome, Notepad, Word, or any other app, then press **Ctrl+Alt+Space** (or the Fix shortcut you chose).
 - To correct the whole field, press **Ctrl+F3** (or your Fix all shortcut). TinyFix selects all, copies, corrects, and pastes back.
-- Press **Ctrl+Alt+M** (or your Skill menu shortcut) to open a small menu of enabled skills next to the caret or mouse cursor. Press 1–9 to run a skill, or Esc to cancel. TinyFix restores the original window before it sends keys.
+- Press **Ctrl+Alt+M** (or your Skill menu shortcut) to open a small menu of enabled skills next to the caret or mouse cursor. Press 1 to 9 to run a skill, or Esc to cancel. TinyFix restores the original window before it sends keys.
 - While TinyFix is working on your text (Fix, Translate, or any skill that takes more than a moment), the tray icon turns its tick into three dots and the bright dot moves along them. The tooltip says “TinyFix is working…”. Quick fixes finish before the dots would show, so they never flicker.
 - Click the tray icon to open **Settings**. Starting TinyFix again (Start menu, a shortcut, or the search box) also opens Settings in the copy that is already running. To correct whatever text is on the clipboard, right-click the tray icon and choose **Fix clipboard**: the corrected text stays on the clipboard and a short notification tells you how many changes were made, or that nothing needed fixing.
 - Right-click the tray icon for **Settings…**, pause, sensitivity, updates, or exit.
@@ -100,17 +112,17 @@ Basic offline fixes (spelling) are always on. The **offline pack** adds context-
 
 A **Sensitivity** submenu in the tray (and the Settings tab) changes how eagerly the built-in engine corrects, live, without restarting:
 
-- **Cautious** — uses the original, conservative thresholds and prefers to leave a word alone.
-- **Balanced** — the default. A little more willing to fix spelling and real-word mix-ups.
-- **Aggressive** — lower confidence floors and real-word swap margins, so it can fix cases such as `creat` → `create` and `fro` → `for` in a “scope for now” context. It still aims to leave clean English (and phrases such as “to and fro”) alone.
+- **Cautious**: uses the original, conservative thresholds and prefers to leave a word alone.
+- **Balanced**: the default. A little more willing to fix spelling and real-word mix-ups.
+- **Aggressive**: lower confidence floors and real-word swap margins, so it can fix cases such as `creat` → `create` and `fro` → `for` in a “scope for now” context. It still aims to leave clean English (and phrases such as “to and fro”) alone.
 
 ### Optional online AI
 
 In **Settings → Online AI** you can add a provider:
 
-- **Google AI Studio (Gemini)** — paste an API key from [Google AI Studio](https://aistudio.google.com/apikey). TinyFix calls the native Gemini `generateContent` REST API.
-- **OpenRouter** — one key for GPT, DeepSeek, Gemini, Claude and more. **Find best models** times the newest cheap models on typo fixes (English and Persian) and picks the fastest correct one as main and the runner-up as fallback. A test run costs well under a cent.
-- **OpenAI-compatible** — base URL + API key. This covers OpenAI, Groq, Ollama, LM Studio, and any other `/v1/chat/completions` server.
+- **Google AI Studio (Gemini)**: paste an API key from [Google AI Studio](https://aistudio.google.com/apikey). TinyFix calls the native Gemini `generateContent` REST API.
+- **OpenRouter**: one key for GPT, DeepSeek, Gemini, Claude and more. **Find best models** times the newest cheap models on typo fixes (English and Persian) and picks the fastest correct one as main and the runner-up as fallback. A test run costs well under a cent.
+- **OpenAI-compatible**: base URL + API key. This covers OpenAI, Groq, Ollama, LM Studio, and any other `/v1/chat/completions` server.
 
 The **fallback** model can sit on a different provider than the main one (for example Google main, OpenRouter fallback), each with its own saved key. When both online models fail, TinyFix uses the offline engine and bounces a red alert icon in the tray.
 
@@ -145,7 +157,7 @@ TinyFix-Setup.exe /VERYSILENT /HOTKEY=none /HOTKEYALL=none
 
 ## Updates
 
-TinyFix checks GitHub for a new release at most once a day when it starts, and whenever you choose **Check for updates** in the tray, in Settings, or in **About TinyFix**. A manual check always runs (it ignores the once-a-day limit) and always shows visible feedback: first **Checking…**, then either the update prompt, **You're on the latest version (vX)**, or **Couldn't check for updates** with a short reason. Every step is written to `tinyfix.log`. If a newer version is available it asks: “TinyFix vX.Y.Z is available. Update now?” Choosing Yes downloads `TinyFix-Setup.exe` and runs a silent upgrade that closes only the TinyFix running from this install folder, keeps your folder, startup choice, shortcuts, and skills, then relaunches the app. If the computer is offline, or GitHub rate-limits the check (HTTP 403/429), a manual check still tells you; an automatic check is only logged and is retried later — it does not count as a successful “checked today”.
+TinyFix checks GitHub for a new release at most once a day when it starts, and whenever you choose **Check for updates** in the tray, in Settings, or in **About TinyFix**. A manual check always runs (it ignores the once-a-day limit) and always shows visible feedback: first **Checking…**, then either the update prompt, **You're on the latest version (vX)**, or **Couldn't check for updates** with a short reason. Every step is written to `tinyfix.log`. If a newer version is available it asks: “TinyFix vX.Y.Z is available. Update now?” Choosing Yes downloads `TinyFix-Setup.exe` and runs a silent upgrade that closes only the TinyFix running from this install folder, keeps your folder, startup choice, shortcuts, and skills, then relaunches the app. If the computer is offline, or GitHub rate-limits the check (HTTP 403/429), a manual check still tells you; an automatic check is only logged and is retried later: it does not count as a successful “checked today”.
 
 **About TinyFix** in the tray menu shows the version, the bundled model revision, the install path, and a link to the GitHub project. The tray tooltip also includes the version, for example `TinyFix v1.4.0`.
 
