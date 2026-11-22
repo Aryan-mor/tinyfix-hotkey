@@ -248,8 +248,11 @@ class SettingsWindow:
         self.root = tk.Toplevel(master) if master is not None else tk.Tk()
         self._owns_mainloop = master is None
         self.root.title("TinyFix Settings")
-        self.root.minsize(760, 680)
-        self.root.geometry("800x760+320+30")
+        # Never taller than the screen: a short screen gets a scrollable tab instead of a clipped OK button.
+        screen_h = self.root.winfo_screenheight()
+        height = max(420, min(760, screen_h - 90))
+        self.root.minsize(760, min(680, height))
+        self.root.geometry(f"800x{height}+320+{max(0, min(30, screen_h - height - 60))}")
         try:
             self.root.attributes("-topmost", True)
             self.root.after(400, lambda: self.root.attributes("-topmost", False))
@@ -307,10 +310,83 @@ class SettingsWindow:
         self._cancel()
 
     def _tab(self, title: str) -> ttk.Frame:
-        frame = ttk.Frame(self.notebook, padding=16)
-        self.notebook.add(frame, text=title)
+        """A notebook page that scrolls when its content is taller than the window (small screens, long forms)."""
+        outer = ttk.Frame(self.notebook)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
+        self.notebook.add(outer, text=title)
+        background = ttk.Style().lookup("TFrame", "background") or self.root.cget("background")
+        canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0, background=background)
+        bar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        frame = ttk.Frame(canvas, padding=16)
         frame.columnconfigure(0, weight=1)
+        window = canvas.create_window((0, 0), window=frame, anchor="nw")
+
+        def layout(_event=None) -> None:
+            width, height = canvas.winfo_width(), canvas.winfo_height()
+            if width <= 1 or height <= 1:
+                return
+            need = frame.winfo_reqheight()
+            # Fill the window when the content is shorter (so stretchy rows still stretch); grow past it when taller.
+            total = max(height, need)
+            canvas.itemconfigure(window, width=width, height=total)
+            canvas.configure(scrollregion=(0, 0, width, total))
+            if need > height + 1:
+                bar.grid(row=0, column=1, sticky="ns")
+            else:
+                bar.grid_remove()
+                canvas.yview_moveto(0)
+
+        frame.bind("<Configure>", layout)
+        canvas.bind("<Configure>", layout)
+        seen = [None]
+
+        def watch() -> None:
+            # The content can change height without any window resize (opening the skill editor, choosing Custom),
+            # and the canvas pins the frame's size, so no <Configure> arrives. Look at the requested height instead.
+            try:
+                state = (frame.winfo_reqheight(), canvas.winfo_height())
+                if state != seen[0]:
+                    seen[0] = state
+                    layout()
+                canvas.after(150, watch)
+            except tk.TclError:
+                pass  # the window was closed
+
+        canvas.after(150, watch)
+        canvas._tinyfix_scroll = (bar, frame)  # found again by the mouse wheel handler
+        if not getattr(self, "_wheel_hooked", False):
+            self._wheel_hooked = True
+            self.root.bind("<MouseWheel>", self._scroll_tab_with_wheel, add="+")
+            # Rolling the wheel over a drop-down or number box must not change its value (it is too easy to do by
+            # accident while scrolling the page). Options change by click or keyboard only; the wheel scrolls the page.
+            for widget_class in ("TCombobox", "TSpinbox", "Spinbox"):
+                self.root.bind_class(widget_class, "<MouseWheel>", self._wheel_over_choice_box)
         return frame
+
+    def _wheel_over_choice_box(self, event) -> str:
+        self._scroll_tab_with_wheel(event, force=True)
+        return "break"  # skip the widget's own wheel handling, which would change the selected option
+
+    def _scroll_tab_with_wheel(self, event, force: bool = False) -> None:
+        widget = event.widget
+        try:
+            if not force and widget.winfo_class() in ("Text", "TCombobox", "Listbox", "Treeview", "Spinbox", "TSpinbox"):
+                return  # these scroll themselves
+            current = self.notebook.nametowidget(self.notebook.select())
+        except (tk.TclError, KeyError, AttributeError):
+            return
+        for child in current.winfo_children():
+            scroll = getattr(child, "_tinyfix_scroll", None)
+            if scroll is None:
+                continue
+            bar, frame = scroll
+            if bar.winfo_manager() != "grid":
+                return  # nothing to scroll
+            child.yview_scroll(int(-event.delta / 120), "units")
+            return
 
     def _build_sensitivity(self) -> None:
         tab = self._tab("Sensitivity")

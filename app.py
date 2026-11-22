@@ -65,7 +65,7 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.5.9"
+APP_VERSION = "1.5.12"
 MUTEX_NAME = "Local\\TinyFixHotkey" + os.environ.get("TINYFIX_MUTEX_SUFFIX", "")  # the suffix is for tests only
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1

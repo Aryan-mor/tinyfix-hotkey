@@ -439,3 +439,84 @@ def test_fallback_can_use_a_different_provider_with_its_own_key_box(window):
     llm = win._current_llm(include_prompts=False)
     assert (llm.fallback_provider, llm.fallback_api_key) == ("openrouter", "or-key")
     assert llm.provider == "google"
+
+
+def test_tabs_scroll_when_the_window_is_shorter_than_the_content(tk_root):
+    win = SettingsWindow(make_data(), FakePack().hooks(), master=tk_root)
+    try:
+        win.root.deiconify()
+        win.root.geometry("800x430+20+20")
+        win.notebook.select(0)
+        win.skills_page.open_editor(0)
+        win.skills_page.f_model_mode.set("Custom (choose below)")
+        win.skills_page._sync_model_fields()
+        for _ in range(30):
+            tk_root.update()
+            time.sleep(0.01)
+        canvas = win.notebook.nametowidget(win.notebook.select()).winfo_children()[0]
+        bar, frame = canvas._tinyfix_scroll
+        assert bar.winfo_manager() == "grid", "a short window must show a scrollbar"
+        assert frame.winfo_reqheight() > canvas.winfo_height()
+        canvas.yview_moveto(1.0)
+        tk_root.update()
+        assert canvas.yview()[1] >= 0.999  # the bottom of the form can be reached
+        win.root.geometry("800x900+20+20")
+        for _ in range(30):
+            tk_root.update()
+            time.sleep(0.01)
+        assert bar.winfo_manager() == "", "a tall window needs no scrollbar"
+    finally:
+        win._close()
+
+
+def test_scrollbar_appears_when_the_form_grows_inside_an_open_window(tk_root):
+    """Opening the skill editor or choosing Custom makes the page taller without any window resize."""
+    win = SettingsWindow(make_data(), FakePack().hooks(), master=tk_root)
+
+    def pump(count=60):
+        for _ in range(count):
+            tk_root.update()
+            time.sleep(0.01)
+
+    try:
+        win.root.deiconify()
+        pump()
+        win.notebook.select(0)
+        win.root.geometry("800x640+20+20")
+        pump()
+        canvas = win.notebook.nametowidget(win.notebook.select()).winfo_children()[0]
+        bar, frame = canvas._tinyfix_scroll
+        assert bar.winfo_manager() == ""  # the skill list fits
+        win.skills_page.open_editor(0)
+        win.skills_page.f_model_mode.set("Custom (choose below)")
+        win.skills_page._sync_model_fields()
+        pump(120)
+        assert frame.winfo_reqheight() > canvas.winfo_height()
+        assert bar.winfo_manager() == "grid"
+    finally:
+        win._close()
+
+
+def test_mouse_wheel_does_not_change_drop_downs_or_number_boxes(tk_root):
+    win = SettingsWindow(make_data(), FakePack().hooks(), master=tk_root)
+    try:
+        win.root.deiconify()
+        for i in range(win.notebook.index("end")):
+            if win.notebook.tab(i, "text") == "Online AI":
+                win.notebook.select(i)
+        for _ in range(30):
+            tk_root.update()
+            time.sleep(0.01)
+        provider_before, timeout_before = win._provider_display.get(), win.timeout.get()
+        for box in (win.fallback_provider_box, win.model_box):
+            before = box.get()
+            box.focus_force()
+            box.event_generate("<MouseWheel>", delta=-120)
+            box.event_generate("<MouseWheel>", delta=120)
+            tk_root.update()
+            assert box.get() == before
+        for child in win.notebook.nametowidget(win.notebook.select()).winfo_children():
+            pass
+        assert win._provider_display.get() == provider_before and win.timeout.get() == timeout_before
+    finally:
+        win._close()
