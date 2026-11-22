@@ -35,7 +35,7 @@ from hotkey_util import (
     disabled_hotkey,
     parse_hotkey,
 )
-from llm_client import LLMConfig, LLMError, LLMTimeout, correct_with_fallback, resolve_google_model, run_skill_online, translate_online
+from llm_client import DEFAULT_GOOGLE_FALLBACK_MODEL, LLMConfig, LLMError, LLMTimeout, correct_with_fallback, resolve_google_model, run_skill_online, translate_online
 from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
 from secret_store import default_secrets_path, load_api_key, save_api_key
 from settings_ui import SettingsData, SettingsHooks, open_settings
@@ -65,7 +65,7 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.5.4"
+APP_VERSION = "1.5.5"
 MUTEX_NAME = "Local\\TinyFixHotkey" + os.environ.get("TINYFIX_MUTEX_SUFFIX", "")  # the suffix is for tests only
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
@@ -502,6 +502,7 @@ def load_settings() -> None:
             provider=provider,
             api_key=load_api_key(SECRETS_PATH),
             model=model,
+            fallback_model=parser.get(CONFIG_SECTION, "llm_fallback_model", fallback=DEFAULT_GOOGLE_FALLBACK_MODEL).strip(),
             base_url=parser.get(CONFIG_SECTION, "llm_base_url", fallback=""),
             timeout=max(1.0, min(30.0, timeout)),
             enabled=_parse_bool(parser.get(CONFIG_SECTION, "llm_enabled", fallback="false")),
@@ -575,6 +576,7 @@ def save_settings(
         parser[CONFIG_SECTION]["llm_model"] = llm_config.model
         parser[CONFIG_SECTION]["llm_base_url"] = llm_config.base_url
         parser[CONFIG_SECTION]["llm_timeout"] = str(llm_config.timeout)
+        parser[CONFIG_SECTION]["llm_fallback_model"] = llm_config.fallback_model
         parser[CONFIG_SECTION]["llm_enabled"] = "true" if llm_config.enabled else "false"
         parser[CONFIG_SECTION]["llm_target_language"] = llm_config.target_language
         # Never write the API key to config.ini.

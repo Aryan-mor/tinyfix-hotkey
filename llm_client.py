@@ -23,6 +23,9 @@ PROVIDER_OPENAI = "openai_compatible"
 PROVIDERS = (PROVIDER_GOOGLE, PROVIDER_OPENAI)
 DEFAULT_TIMEOUT = 6.0
 DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_GOOGLE_FALLBACK_MODEL = "gemini-2.5-flash-lite"
+# After the main model fails, use the fallback model first for this many seconds before trying the main one again.
+FALLBACK_WINDOW_SECONDS = 120.0
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
 def resolve_google_model(value: str | None) -> str:
@@ -94,6 +97,7 @@ class LLMConfig:
     provider: str = PROVIDER_GOOGLE
     api_key: str = ""
     model: str = DEFAULT_GOOGLE_MODEL
+    fallback_model: str = DEFAULT_GOOGLE_FALLBACK_MODEL
     base_url: str = ""
     timeout: float = DEFAULT_TIMEOUT
     enabled: bool = False
@@ -234,6 +238,49 @@ def _complete_openai(config: LLMConfig, prompt: str, timeout: float) -> str:
     return strip_model_output(str(text))
 
 
+_fallback_until: dict[str, float] = {}
+
+
+def _fallback_worthy(exc: LLMError) -> bool:
+    """Timeouts, rate limits, server errors, and network failures. Not bad keys or bad requests."""
+    if isinstance(exc, LLMTimeout):
+        return True
+    message = str(exc)
+    if message.startswith("HTTP "):
+        code = message[5:8]
+        return code in {"429", "500", "502", "503", "504"} or code.startswith("5")
+    return message.startswith("Network error") or "no candidates" in message or "empty text" in message
+
+
+def _complete_google_with_fallback(config: LLMConfig, prompt: str, timeout: float) -> str:
+    import dataclasses
+    import time
+
+    main = (config.model or DEFAULT_GOOGLE_MODEL).strip()
+    backup = (config.fallback_model or "").strip()
+    if not backup or backup == main:
+        return _complete_gemini(config, prompt, timeout)
+    backup_config = dataclasses.replace(config, model=backup)
+    if _fallback_until.get(main, 0.0) > time.monotonic():
+        try:
+            return _complete_gemini(backup_config, prompt, timeout)
+        except LLMError as exc:
+            logger.info("Fallback model %s failed (%s); trying %s", backup, exc, main)
+            return _complete_gemini(config, prompt, timeout)
+    try:
+        return _complete_gemini(config, prompt, timeout)
+    except LLMError as exc:
+        if not _fallback_worthy(exc):
+            raise
+        logger.info("Model %s failed (%s); using %s for the next %.0f s", main, exc, backup, FALLBACK_WINDOW_SECONDS)
+        _fallback_until[main] = time.monotonic() + FALLBACK_WINDOW_SECONDS
+        try:
+            return _complete_gemini(backup_config, prompt, timeout)
+        except LLMError:
+            _fallback_until.pop(main, None)
+            raise exc
+
+
 def complete(config: LLMConfig, prompt: str, timeout: float | None = None) -> str:
     timeout = float(config.timeout if timeout is None else timeout)
     if timeout <= 0:
@@ -243,7 +290,7 @@ def complete(config: LLMConfig, prompt: str, timeout: float | None = None) -> st
     if not (config.model or "").strip():
         raise LLMError("A model name is required")
     if config.provider == PROVIDER_GOOGLE:
-        return _complete_gemini(config, prompt, timeout)
+        return _complete_google_with_fallback(config, prompt, timeout)
     if config.provider == PROVIDER_OPENAI:
         return _complete_openai(config, prompt, timeout)
     raise LLMError(f"Unknown provider: {config.provider}")
