@@ -31,8 +31,12 @@ jobs:
         run: |
           $files = Get-ChildItem dist/pack -File | ForEach-Object { $_.FullName }
           gh release view offline-pack *> $null
+          # The app's update check reads GitHub's "latest release". This release must NEVER be "latest", or every
+          # TinyFix update check would see the tag "offline-pack" instead of a version. Pre-releases are skipped
+          # by "latest", and the pack is still downloadable from its fixed URL.
           if ($LASTEXITCODE -eq 0) {
             gh release upload offline-pack $files --clobber
           } else {
-            gh release create offline-pack $files --title "Offline pack" --notes "Optional download used by TinyFix. Not an app release."
+            gh release create offline-pack $files --title "Offline pack" --notes "Optional download used by TinyFix. Not an app release." --prerelease --latest=false
           }
+          gh release edit offline-pack --prerelease --latest=false
