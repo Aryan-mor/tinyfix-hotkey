@@ -33,7 +33,7 @@ MODEL_REVISION = "8efdf5cd91b32584f4077aa0e8ecaf48f7651bef"
 SPELLING_MIN_CONFIDENCE = 0.55
 CONTEXT_BEFORE = 600
 CONTEXT_AFTER = 200
-DEFAULT_SENSITIVITY = "cautious"
+DEFAULT_SENSITIVITY = "balanced"
 SENSITIVITY_NAMES = ("cautious", "balanced", "aggressive")
 
 WORD = re.compile(r"[A-Za-z']+")
@@ -71,7 +71,7 @@ class SensitivityPreset:
     known_word_max_length: int = 5
 
 
-# cautious = current production defaults (eager real-word checker + 0.55 spelling floor).
+# cautious keeps the original conservative thresholds; balanced is the product default.
 SENSITIVITY_PRESETS: dict[str, SensitivityPreset] = {
     "cautious": SensitivityPreset(
         name="cautious",

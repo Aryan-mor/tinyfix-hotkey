@@ -21,8 +21,14 @@ PROVIDER_GOOGLE = "google"
 PROVIDER_OPENAI = "openai_compatible"
 PROVIDERS = (PROVIDER_GOOGLE, PROVIDER_OPENAI)
 DEFAULT_TIMEOUT = 2.0
-DEFAULT_GOOGLE_MODEL = "gemini-2.0-flash"
+DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+
+def resolve_google_model(value: str | None) -> str:
+    """Keep a non-empty chosen model; only empty/unset values get the default."""
+    raw = (value or "").strip()
+    return raw or DEFAULT_GOOGLE_MODEL
+
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 USER_AGENT = "TinyFix-Hotkey-LLM"
 TEST_SAMPLE = "Hi frinds"

@@ -28,10 +28,13 @@ WS_POPUP = 0x80000000
 SW_SHOWNOACTIVATE = 4
 SW_SHOW = 5
 HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
+SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
 PM_REMOVE = 0x0001
+WM_HOTKEY = 0x0312
 WM_KEYFIRST = 0x0100
 WM_KEYLAST = 0x0109
 WM_MOUSEFIRST = 0x0200
@@ -173,6 +176,7 @@ user32.GetAsyncKeyState.restype = wintypes.SHORT
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 kernel32.GetModuleHandleW.restype = wintypes.HINSTANCE
 kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+kernel32.GetCurrentProcessId.restype = wintypes.DWORD
 
 
 @WNDPROC
@@ -191,9 +195,34 @@ def restore_foreground(hwnd: int | None) -> None:
     if not hwnd:
         return
     try:
-        _force_foreground(int(hwnd))
+        _force_foreground(int(hwnd), allow_topmost=False)
     except Exception:
         logger.debug("Could not restore the foreground window", exc_info=True)
+
+
+def _window_pid(hwnd: int) -> int:
+    pid = wintypes.DWORD(0)
+    if hwnd:
+        user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
+    return int(pid.value)
+
+
+def _is_our_window(hwnd: int) -> bool:
+    return bool(hwnd) and _window_pid(hwnd) == int(kernel32.GetCurrentProcessId())
+
+
+def _set_zorder(hwnd: int, insert_after: int, flags: int) -> bool:
+    return bool(
+        user32.SetWindowPos(
+            wintypes.HWND(hwnd),
+            wintypes.HWND(insert_after),
+            0,
+            0,
+            0,
+            0,
+            flags,
+        )
+    )
 
 
 def caret_or_cursor_position() -> tuple[int, int]:
@@ -239,6 +268,15 @@ def flush_input_queue() -> int:
     return count
 
 
+def flush_pending_hotkeys() -> int:
+    """Drop queued WM_HOTKEY messages so a held combo cannot reopen the menu immediately."""
+    msg = MSG()
+    count = 0
+    while user32.PeekMessageW(ctypes.byref(msg), None, WM_HOTKEY, WM_HOTKEY, PM_REMOVE):
+        count += 1
+    return count
+
+
 def _ensure_class() -> None:
     global _class_registered
     if _class_registered:
@@ -256,23 +294,45 @@ def _ensure_class() -> None:
     _class_registered = True
 
 
-def _force_foreground(hwnd: int) -> bool:
+def _force_foreground(hwnd: int, *, allow_topmost: bool = False) -> bool:
+    """Bring *hwnd* forward. Foreign windows are never given HWND_TOPMOST.
+
+    AttachThreadInput is always detached in ``finally``. If a brief TOPMOST bump
+    is used (our owner window only), it is always cleared in ``finally``.
+    """
     if not hwnd:
         return False
     target = wintypes.HWND(hwnd)
+    if allow_topmost and not _is_our_window(hwnd):
+        logger.warning(
+            "Refusing HWND_TOPMOST for foreign hwnd=%s pid=%s",
+            int(hwnd),
+            _window_pid(hwnd),
+        )
+        allow_topmost = False
     foreground = user32.GetForegroundWindow()
     our_thread = kernel32.GetCurrentThreadId()
     fg_thread = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
     attached = False
-    if fg_thread and fg_thread != our_thread:
-        attached = bool(user32.AttachThreadInput(our_thread, fg_thread, True))
+    raised_topmost = False
     try:
+        if fg_thread and fg_thread != our_thread:
+            attached = bool(user32.AttachThreadInput(our_thread, fg_thread, True))
         user32.BringWindowToTop(target)
-        user32.SetWindowPos(target, wintypes.HWND(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-        return bool(user32.SetForegroundWindow(target))
+        if allow_topmost:
+            _set_zorder(hwnd, HWND_TOPMOST, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+            raised_topmost = True
+        ok = bool(user32.SetForegroundWindow(target))
+        logger.info("SetForegroundWindow hwnd=%s allow_topmost=%s ok=%s", int(hwnd), allow_topmost, ok)
+        return ok
     finally:
+        if raised_topmost:
+            _set_zorder(hwnd, HWND_NOTOPMOST, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
         if attached:
-            user32.AttachThreadInput(our_thread, fg_thread, False)
+            try:
+                user32.AttachThreadInput(our_thread, fg_thread, False)
+            except Exception:
+                logger.debug("AttachThreadInput detach failed", exc_info=True)
 
 
 def _create_owner_window(x: int, y: int) -> int:
@@ -330,7 +390,7 @@ def show_skill_menu(
     target = int(target_hwnd or get_foreground_hwnd())
     x, y = position or caret_or_cursor_position()
     if wait_for_keys:
-        released = wait_for_hotkey_keys_released(0.5)
+        released = wait_for_hotkey_keys_released(0.75)
         if not released:
             logger.info("Skill menu: modifiers still held after waiting")
     flushed = flush_input_queue()
@@ -362,8 +422,9 @@ def show_skill_menu(
             logger.error("Skill menu: could not create an owner window (err=%s)", ctypes.get_last_error())
             return MenuChoice(skill=None, cancelled=True, target_hwnd=target, elapsed_ms=0, native_result=0)
 
-        user32.ShowWindow(wintypes.HWND(owner), SW_SHOW)
-        _force_foreground(owner)
+        user32.ShowWindow(wintypes.HWND(owner), SW_SHOWNOACTIVATE)
+        if not _force_foreground(owner, allow_topmost=True):
+            logger.info("Skill menu: could not bring the owner window to the foreground")
         flush_input_queue()
 
         flags = TPM_LEFTALIGN | TPM_TOPALIGN | TPM_LEFTBUTTON | TPM_RETURNCMD
@@ -371,8 +432,16 @@ def show_skill_menu(
     finally:
         elapsed_ms = (time.perf_counter() - started) * 1000
         if owner:
+            # Drop TOPMOST before destroy so a failed DestroyWindow cannot leave
+            # a 1x1 owner window sitting above every other app.
+            _set_zorder(owner, HWND_NOTOPMOST, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
             user32.DestroyWindow(wintypes.HWND(owner))
         user32.DestroyMenu(menu)
+        stale = flush_pending_hotkeys()
+        if stale:
+            logger.info("Skill menu: flushed %s queued hotkey message(s)", stale)
+        if target:
+            restore_foreground(target)
 
     logger.info(
         "Skill menu closed (result=%s, elapsed=%.0fms, owner=%s, target=%s)",

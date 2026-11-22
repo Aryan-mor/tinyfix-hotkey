@@ -30,8 +30,9 @@ def test_normalize_sensitivity_aliases_and_fallback():
     assert normalize_sensitivity("Cautious") == "cautious"
     assert normalize_sensitivity("BALANCED") == "balanced"
     assert normalize_sensitivity("aggressive") == "aggressive"
-    assert normalize_sensitivity("unknown") == "cautious"
-    assert normalize_sensitivity(None) == "cautious"
+    assert normalize_sensitivity("unknown") == "balanced"
+    assert normalize_sensitivity(None) == "balanced"
+    assert DEFAULT_SENSITIVITY == "balanced"
 
 
 def test_each_preset_still_fixes_the_sample(engine):

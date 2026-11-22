@@ -60,8 +60,8 @@ Examples you can add yourself:
 
 A **Sensitivity** submenu in the tray (and the Settings tab) changes how eagerly the built-in engine corrects, live, without restarting:
 
-- **Cautious** — the default. Uses the original, conservative thresholds and prefers to leave a word alone.
-- **Balanced** — a little more willing to fix spelling and real-word mix-ups.
+- **Cautious** — uses the original, conservative thresholds and prefers to leave a word alone.
+- **Balanced** — the default. A little more willing to fix spelling and real-word mix-ups.
 - **Aggressive** — lower confidence floors and real-word swap margins, so it can fix cases such as `creat` → `create` and `fro` → `for` in a “scope for now” context. It still aims to leave clean English (and phrases such as “to and fro”) alone.
 
 ### Optional online AI
@@ -71,7 +71,7 @@ In **Settings → Online AI** you can add a provider:
 - **Google AI Studio (Gemini)** — paste an API key from [Google AI Studio](https://aistudio.google.com/apikey). TinyFix calls the native Gemini `generateContent` REST API.
 - **OpenAI-compatible** — base URL + API key. This covers OpenAI, OpenRouter, Groq, Ollama, LM Studio, and any other `/v1/chat/completions` server.
 
-Refresh the model list from the provider when possible, or type a model name. **Test** sends a tiny typo-correction request; only after a successful test can you tick **Use online model**. The default timeout is **2 seconds**. If the request times out or errors, TinyFix silently falls back to the built-in offline engine and logs the reason (never the key, never your text). With no key, everything works as it does today.
+The default Gemini model is `gemini-3.5-flash-lite`. Refresh the model list from the provider when possible, or type a model name. An existing `llm_model` in `config.ini` is left unchanged. **Test** sends a tiny typo-correction request; only after a successful test can you tick **Use online model**. The default timeout is **2 seconds**. If the request times out or errors, TinyFix silently falls back to the built-in offline engine and logs the reason (never the key, never your text). With no key, everything works as it does today.
 
 API keys are stored with Windows DPAPI (`CryptProtectData`) in `secrets.dpapi` next to the app. They are never written to `config.ini` and never logged.
 
@@ -90,7 +90,7 @@ Shortcuts, sensitivity, and non-secret online settings are stored in `config.ini
 hotkey=Ctrl+Alt+Space
 hotkey_all=Ctrl+F3
 hotkey_translate=Ctrl+Alt+T
-sensitivity=cautious
+sensitivity=balanced
 ```
 
 User-defined skills (and the Skill menu shortcut) are stored in `skills.json` in the same folder. This file is not encrypted; do not put API keys in a prompt. Upgrades from 1.2.x create `skills.json` from your existing shortcuts and prompts on first launch.
@@ -108,7 +108,9 @@ TinyFix-Setup.exe /VERYSILENT /HOTKEY=none /HOTKEYALL=none
 
 TinyFix checks GitHub for a new release at most once a day when it starts, and whenever you choose **Check for updates** in the tray, in Settings, or in **About TinyFix**. A manual check always runs (it ignores the once-a-day limit) and always shows visible feedback: first **Checking…**, then either the update prompt, **You're on the latest version (vX)**, or **Couldn't check for updates** with a short reason. Every step is written to `tinyfix.log`. If a newer version is available it asks: “TinyFix vX.Y.Z is available. Update now?” Choosing Yes downloads `TinyFix-Setup.exe` and runs a silent upgrade that closes only the TinyFix running from this install folder, keeps your folder, startup choice, shortcuts, and skills, then relaunches the app. If the computer is offline, or GitHub rate-limits the check (HTTP 403/429), a manual check still tells you; an automatic check is only logged and is retried later — it does not count as a successful “checked today”.
 
-**About TinyFix** in the tray menu shows the version, the bundled model revision, the install path, and a link to the GitHub project. The tray tooltip also includes the version, for example `TinyFix v1.3.1`.
+**About TinyFix** in the tray menu shows the version, the bundled model revision, the install path, and a link to the GitHub project. The tray tooltip also includes the version, for example `TinyFix v1.3.2`.
+
+v1.3.2 changes the default sensitivity to Balanced and the default Gemini model to `gemini-3.5-flash-lite` (existing config values are kept). It also stops TinyFix from leaving other windows always-on-top or holding focus after Fix, the Skill menu, or Settings (foreign windows are never made topmost; thread-input attaches are always detached; the hidden UI window is not raised), speeds up Settings OK by moving ACL work off the UI thread, and tightens Settings/update UI threading and silent upgrades when the app cannot be closed.
 
 ## Uninstall
 

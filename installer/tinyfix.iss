@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.3.1"
+#define MyAppVersion "1.3.2"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -625,7 +625,10 @@ begin
     Log('TinyFix was running from the install folder; it will be closed and relaunched after install');
   StopTinyFixInApp;
   if TinyFixIsRunningInApp then
-    Log('Warning: TinyFix.exe in the install folder is still running after the close attempt');
+  begin
+    Log('TinyFix.exe in the install folder is still running after the close attempt; aborting setup');
+    Result := 'TinyFix is still running from the install folder, so setup cannot replace its files. Close it and try again.';
+  end;
 end;
 
 function InitializeUninstall(): Boolean;

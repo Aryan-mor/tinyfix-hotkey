@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import threading
 import os
 import sys
 from ctypes import wintypes
@@ -107,20 +108,29 @@ def default_secrets_path(root: Path) -> Path:
 
 
 def _restrict_to_current_user(path: Path) -> None:
-    """Best-effort: stop the encrypted key file being inherited by Everyone."""
+    """Best-effort: stop the encrypted key file being inherited by Everyone.
+
+    icacls can take several seconds, so this must never run on the UI thread
+    synchronously (it made Settings OK feel frozen).
+    """
     if sys.platform != "win32":
         return
-    try:
-        import subprocess
 
-        subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{os.environ.get('USERNAME', '')}:(R,W)"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        pass
+    def work() -> None:
+        try:
+            import subprocess
+
+            subprocess.run(
+                ["icacls", str(path), "/inheritance:r", "/grant:r", f"{os.environ.get('USERNAME', '')}:(R,W)"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=work, name="tinyfix-acl", daemon=True).start()
 
 
 def save_api_key(path: Path, api_key: str) -> None:

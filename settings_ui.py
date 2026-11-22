@@ -21,6 +21,7 @@ from hotkey_util import (
     parse_hotkey,
 )
 from llm_client import (
+    DEFAULT_GOOGLE_MODEL,
     DEFAULT_TIMEOUT,
     LLMConfig,
     LLMError,
@@ -43,7 +44,7 @@ from skills import (
     find_conflicts,
     new_custom_skill,
 )
-from tinyfix_lib import SENSITIVITY_NAMES
+from tinyfix_lib import DEFAULT_SENSITIVITY, SENSITIVITY_NAMES
 
 AISTUDIO_KEY_URL = "https://aistudio.google.com/apikey"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
@@ -62,7 +63,7 @@ class SettingsData:
     hotkey_all: Hotkey
     hotkey_translate: Hotkey
     translate_select_all: bool = False
-    sensitivity: str = "cautious"
+    sensitivity: str = DEFAULT_SENSITIVITY
     llm: LLMConfig = field(default_factory=LLMConfig)
     last_update_check: str = ""
     skills: list[Skill] = field(default_factory=default_skills)
@@ -328,8 +329,8 @@ class SettingsWindow:
         tab = self._tab("Sensitivity")
         self.sensitivity = tk.StringVar(value=self.data.sensitivity)
         descriptions = {
-            "cautious": "Default. Conservative thresholds; prefers to leave a word alone.",
-            "balanced": "A little more willing to fix spelling and real-word mix-ups.",
+            "cautious": "Conservative thresholds; prefers to leave a word alone.",
+            "balanced": "Default. A little more willing to fix spelling and real-word mix-ups.",
             "aggressive": "Fixes more, including cases such as creat → create and fro → for when the engine can.",
         }
         ttk.Label(tab, text="This applies immediately, including while the Settings window is open.", wraplength=640).grid(
@@ -364,7 +365,10 @@ class SettingsWindow:
         self.api_key = tk.StringVar(value=self.data.llm.api_key or "")
         self.show_key = tk.BooleanVar(value=False)
         self.base_url = tk.StringVar(value=self.data.llm.base_url or "")
-        self.model = tk.StringVar(value=self.data.llm.model or "")
+        initial_model = (self.data.llm.model or "").strip()
+        if not initial_model and (self.data.llm.provider or PROVIDER_GOOGLE) == PROVIDER_GOOGLE:
+            initial_model = DEFAULT_GOOGLE_MODEL
+        self.model = tk.StringVar(value=initial_model)
         self.timeout = tk.StringVar(value=str(int(self.data.llm.timeout or DEFAULT_TIMEOUT) if float(self.data.llm.timeout).is_integer() else self.data.llm.timeout))
         self.use_online = tk.BooleanVar(value=bool(self.data.llm.enabled and self.data.llm.api_key))
         self.online_status = tk.StringVar(value="")
@@ -399,7 +403,7 @@ class SettingsWindow:
         self.base_url.trace_add("write", lambda *_: self._invalidate_test())
 
         ttk.Label(tab, text="Model").grid(row=5, column=0, sticky="w")
-        self.model_box = ttk.Combobox(tab, textvariable=self.model, values=())
+        self.model_box = ttk.Combobox(tab, textvariable=self.model, values=self._model_choices())
         self.model_box.grid(row=5, column=1, sticky="ew", pady=4)
         ttk.Button(tab, text="Refresh models", command=self._refresh_models).grid(row=5, column=2, padx=(8, 0))
         self.model.trace_add("write", lambda *_: self._invalidate_test())
@@ -427,6 +431,10 @@ class SettingsWindow:
             self.key_help.configure(text="Works with OpenAI, OpenRouter, Groq, Ollama, LM Studio, and other /v1 APIs")
         else:
             self.key_help.configure(text="Get a Gemini API key from Google AI Studio")
+            if hasattr(self, "model_box"):
+                self.model_box.configure(values=self._model_choices())
+                if not (self.model.get() or "").strip():
+                    self.model.set(DEFAULT_GOOGLE_MODEL)
         self._invalidate_test()
 
     def _toggle_key(self) -> None:
@@ -482,6 +490,20 @@ class SettingsWindow:
                 config.target_language = self.target_language.get().strip() or DEFAULT_TARGET_LANGUAGE
         return config
 
+    def _model_choices(self, names: list[str] | None = None) -> list[str]:
+        values: list[str] = []
+        for name in names or []:
+            item = (name or "").strip()
+            if item and item not in values:
+                values.append(item)
+        if self.provider.get() == PROVIDER_GOOGLE and DEFAULT_GOOGLE_MODEL not in values:
+            values.insert(0, DEFAULT_GOOGLE_MODEL)
+        current = (self.model.get() if hasattr(self, "model") else "") or ""
+        current = current.strip()
+        if current and current not in values:
+            values.append(current)
+        return values
+
     def _refresh_models(self) -> None:
         self.online_status.set("Fetching models…")
 
@@ -496,9 +518,12 @@ class SettingsWindow:
                 if error:
                     self.online_status.set(error)
                     return
-                self.model_box.configure(values=names)
-                if names and self.model.get() not in names:
-                    self.model.set(names[0])
+                self.model_box.configure(values=self._model_choices(names))
+                if not (self.model.get() or "").strip():
+                    if self.provider.get() == PROVIDER_GOOGLE:
+                        self.model.set(DEFAULT_GOOGLE_MODEL)
+                    elif names:
+                        self.model.set(names[0])
                 self.online_status.set(f"Found {len(names)} model(s)." if names else "No models were returned. You can type a model name.")
             self.root.after(0, done)
 

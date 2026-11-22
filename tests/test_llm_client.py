@@ -6,10 +6,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from llm_client import (
+    DEFAULT_GOOGLE_MODEL,
     LLMConfig,
     LLMTimeout,
     complete,
     correct_with_fallback,
+    resolve_google_model,
     sanitize_error,
     probe_connection,
 )
@@ -111,7 +113,7 @@ def test_disabled_or_missing_key_stays_offline():
     engine = _StubEngine()
     result, source = correct_with_fallback("Hi frinds", engine, None)
     assert source == "offline"
-    config = LLMConfig(enabled=True, api_key="", provider="google", model="gemini-2.0-flash")
+    config = LLMConfig(enabled=True, api_key="", provider="google", model=DEFAULT_GOOGLE_MODEL)
     result, source = correct_with_fallback("Hi frinds", engine, config)
     assert source == "offline"
     assert result.endswith("[offline]")
@@ -131,3 +133,12 @@ def test_remote_http_base_url_is_rejected():
         _normalize_openai_base("http://example.invalid/v1")
     assert _normalize_openai_base("http://127.0.0.1:1234/v1") == "http://127.0.0.1:1234/v1"
     assert _normalize_openai_base("https://openrouter.ai/api/v1") == "https://openrouter.ai/api/v1"
+
+
+def test_resolve_google_model_keeps_chosen_and_fills_empty():
+    assert DEFAULT_GOOGLE_MODEL == "gemini-3.5-flash-lite"
+    assert resolve_google_model("") == DEFAULT_GOOGLE_MODEL
+    assert resolve_google_model("   ") == DEFAULT_GOOGLE_MODEL
+    assert resolve_google_model(None) == DEFAULT_GOOGLE_MODEL
+    assert resolve_google_model("gemini-2.0-flash") == "gemini-2.0-flash"
+    assert resolve_google_model("gemini-3.5-flash-lite") == "gemini-3.5-flash-lite"

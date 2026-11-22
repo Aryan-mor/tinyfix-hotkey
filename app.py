@@ -26,7 +26,7 @@ from hotkey_util import (
     disabled_hotkey,
     parse_hotkey,
 )
-from llm_client import LLMConfig, LLMError, LLMTimeout, correct_with_fallback, run_skill_online, translate_online
+from llm_client import LLMConfig, LLMError, LLMTimeout, correct_with_fallback, resolve_google_model, run_skill_online, translate_online
 from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
 from secret_store import default_secrets_path, load_api_key, save_api_key
 from settings_ui import SettingsData, SettingsHooks, open_settings
@@ -56,7 +56,7 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 MUTEX_NAME = "Local\\TinyFixHotkey"
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
@@ -280,6 +280,7 @@ ui_work_queue: queue.Queue[tuple[str, object]] = queue.Queue()
 ui_thread = None
 ui_root = None
 ui_ready = threading.Event()
+_ui_thread_lock = threading.Lock()
 
 
 def setup_logging() -> None:
@@ -398,10 +399,18 @@ def load_settings() -> None:
             timeout = float(parser.get(CONFIG_SECTION, "llm_timeout", fallback=str(2)))
         except ValueError:
             timeout = 2.0
+        provider = parser.get(CONFIG_SECTION, "llm_provider", fallback="google") or "google"
+        raw_model = parser.get(CONFIG_SECTION, "llm_model", fallback="").strip()
+        if raw_model:
+            model = raw_model
+        elif provider == "google":
+            model = resolve_google_model("")
+        else:
+            model = raw_model
         llm_config = LLMConfig(
-            provider=parser.get(CONFIG_SECTION, "llm_provider", fallback="google") or "google",
+            provider=provider,
             api_key=load_api_key(SECRETS_PATH),
-            model=parser.get(CONFIG_SECTION, "llm_model", fallback="gemini-2.0-flash"),
+            model=model,
             base_url=parser.get(CONFIG_SECTION, "llm_base_url", fallback=""),
             timeout=max(1.0, min(30.0, timeout)),
             enabled=_parse_bool(parser.get(CONFIG_SECTION, "llm_enabled", fallback="false")),
@@ -601,6 +610,10 @@ def send_ctrl_key(vk: int) -> None:
     sent = user32.SendInput(4, array, ctypes.sizeof(INPUT))
     if sent != 4:
         logging.warning("SendInput sent %s of 4 events (err=%s)", sent, ctypes.get_last_error())
+        # Always complete the key-ups so Ctrl or the letter cannot stick.
+        ups = (_key_event(vk, True), _key_event(VK_CONTROL, True))
+        up_array = (INPUT * 2)(*ups)
+        user32.SendInput(2, up_array, ctypes.sizeof(INPUT))
 
 
 def wait_for_clipboard_change(previous: int, timeout: float = 0.4) -> bool:
@@ -1048,11 +1061,13 @@ def about_info() -> dict[str, str]:
 
 def start_ui_thread() -> None:
     global ui_thread
-    if ui_thread is not None and ui_thread.is_alive():
-        return
-    ui_ready.clear()
-    ui_thread = threading.Thread(target=_ui_thread_main, name="tinyfix-ui", daemon=True)
-    ui_thread.start()
+    with _ui_thread_lock:
+        if ui_thread is not None and ui_thread.is_alive():
+            return
+        ui_ready.clear()
+        thread = threading.Thread(target=_ui_thread_main, name="tinyfix-ui", daemon=True)
+        ui_thread = thread
+        thread.start()
     if not ui_ready.wait(timeout=5):
         logging.warning("UI thread did not become ready")
 
@@ -1119,6 +1134,42 @@ def _dispatch_ui(action: str, payload: object = None) -> None:
         logging.info("Unknown UI action: %s", action)
 
 
+def _transient_dialog_host(parent):
+    """A short-lived topmost Toplevel for message boxes.
+
+    The hidden UI root must never be made topmost or deiconified: that can
+    leave a window above every other app and make them feel stuck.
+    """
+    import tkinter as tk
+
+    if parent is None:
+        return None
+    try:
+        host = tk.Toplevel(parent)
+        host.withdraw()
+        host.overrideredirect(True)
+        host.geometry("1x1+0+0")
+        host.attributes("-topmost", True)
+        return host
+    except tk.TclError:
+        return None
+
+
+def _destroy_transient_dialog_host(host) -> None:
+    import tkinter as tk
+
+    if host is None:
+        return
+    try:
+        host.attributes("-topmost", False)
+    except tk.TclError:
+        pass
+    try:
+        host.destroy()
+    except tk.TclError:
+        pass
+
+
 def _show_info_dialog(title: str, message: str) -> None:
     import tkinter as tk
     from tkinter import messagebox
@@ -1127,19 +1178,11 @@ def _show_info_dialog(title: str, message: str) -> None:
     if parent is None:
         notify(title, message)
         return
+    host = _transient_dialog_host(parent)
     try:
-        parent.deiconify()
-        parent.withdraw()
-        parent.attributes("-topmost", True)
-    except tk.TclError:
-        pass
-    try:
-        messagebox.showinfo(title, message, parent=parent)
+        messagebox.showinfo(title, message, parent=host or parent)
     finally:
-        try:
-            parent.attributes("-topmost", False)
-        except tk.TclError:
-            pass
+        _destroy_transient_dialog_host(host)
     logging.info("Shown message box: %s", message)
 
 
@@ -1516,12 +1559,27 @@ def show_hotkey_dialog(reason: str | None = None) -> None:
     ttk.Button(buttons, text="OK", command=on_ok).grid(row=0, column=1)
     root.protocol("WM_DELETE_WINDOW", on_cancel)
     root.transient()
+    grabbed = False
     try:
         root.grab_set()
+        grabbed = True
     except tk.TclError:
         pass
-    root.focus_force()
-    root.mainloop()
+    try:
+        root.focus_force()
+        root.mainloop()
+    finally:
+        if grabbed:
+            try:
+                if root.winfo_exists():
+                    root.grab_release()
+            except tk.TclError:
+                pass
+        try:
+            if root.winfo_exists():
+                root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
 
     chosen = result["value"]
     if chosen is not None:
@@ -1540,8 +1598,15 @@ def _last_update_check_value() -> str:
 
 def apply_settings_data(data: SettingsData) -> None:
     global translate_select_all, llm_config, skill_store, current_hotkey_menu
-    current_sensitivity_before = current_sensitivity
-    apply_sensitivity_setting(data.sensitivity, persist=True)
+    started = time.perf_counter()
+    logging.info("Settings save starting")
+    new_sensitivity = normalize_sensitivity(data.sensitivity)
+    if new_sensitivity != current_sensitivity:
+        # Thresholds only; this does not reload the model.
+        apply_sensitivity_setting(new_sensitivity, persist=False)
+        logging.info("Settings save: sensitivity applied in %.0fms", (time.perf_counter() - started) * 1000)
+    else:
+        logging.info("Settings save: sensitivity unchanged (%s)", current_sensitivity)
     skill_store = SkillStore(
         version=getattr(skill_store, "version", 1),
         skills=[Skill.from_dict(skill.to_dict()) for skill in (data.skills or [])] or list(skill_store.skills),
@@ -1551,18 +1616,18 @@ def apply_settings_data(data: SettingsData) -> None:
     _sync_legacy_from_skills()
     translate_select_all = data.translate_select_all
     llm_config = data.llm
-    apply_hotkeys(data.hotkey, data.hotkey_all, data.hotkey_translate, persist=True)
+    apply_hotkeys(data.hotkey, data.hotkey_all, data.hotkey_translate, persist=False)
+    logging.info("Settings save: hotkeys posted in %.0fms", (time.perf_counter() - started) * 1000)
     try:
         save_settings(persist_hotkeys=True, persist_sensitivity=True, persist_llm=True, persist_skills=True)
     except Exception:
         logging.exception("Could not save settings")
-    if current_sensitivity_before != current_sensitivity:
-        pass
     logging.info(
-        "Settings saved (online=%s, provider=%s, sensitivity=%s)",
+        "Settings saved (online=%s, provider=%s, sensitivity=%s, elapsed=%.0fms)",
         llm_config.ready,
         llm_config.provider,
         current_sensitivity,
+        (time.perf_counter() - started) * 1000,
     )
 
 
@@ -1593,31 +1658,37 @@ def prompt_update(latest: LatestRelease) -> None:
     import tkinter as tk
     from tkinter import messagebox
 
-    root = tk.Tk()
-    root.withdraw()
+    parent = ui_root
+    if parent is None:
+        logging.warning("Update prompt skipped: UI thread is not ready")
+        notify("TinyFix", f"TinyFix v{latest.version} is available. Open About to update.")
+        return
+    host = _transient_dialog_host(parent)
     try:
-        root.attributes("-topmost", True)
-    except tk.TclError:
-        pass
-    answer = messagebox.askyesno(
-        "TinyFix",
-        f"TinyFix v{latest.version} is available. Update now?",
-        parent=root,
-    )
-    root.destroy()
+        answer = messagebox.askyesno(
+            "TinyFix",
+            f"TinyFix v{latest.version} is available. Update now?",
+            parent=host or parent,
+        )
+    finally:
+        _destroy_transient_dialog_host(host)
     if not answer:
         logging.info("User declined the update to v%s", latest.version)
         return
-    try:
-        dest = default_setup_download_path()
-        logging.info("Downloading %s to %s", latest.setup_url, dest)
-        download_file(latest.setup_url, dest)
-        start_silent_update(dest)
-        logging.info("Started silent update; exiting so files can be replaced")
-        request_stop()
-    except Exception:
-        logging.exception("Could not apply the TinyFix update")
-        _show_info_dialog("TinyFix", "Couldn't install the update. See tinyfix.log for details.")
+
+    def work() -> None:
+        try:
+            dest = default_setup_download_path()
+            logging.info("Downloading %s to %s", latest.setup_url, dest)
+            download_file(latest.setup_url, dest)
+            start_silent_update(dest)
+            logging.info("Started silent update; exiting so files can be replaced")
+            request_stop()
+        except Exception:
+            logging.exception("Could not apply the TinyFix update")
+            ui_work_queue.put(("update-error", "Couldn't install the update. See tinyfix.log for details."))
+
+    threading.Thread(target=work, name="tinyfix-update-download", daemon=True).start()
 
 
 def _is_rate_limit_error(error: str | None) -> bool:
