@@ -220,3 +220,25 @@ def test_slow_server_is_waited_for_when_there_is_no_local_model(openai_server):
 
     _result, source = correct_with_fallback("Hi frinds", NoLocal(), config)
     assert source == "online"
+
+
+def test_skill_models_default_better_and_custom():
+    from llm_client import BETTER_MODELS, LLMConfig, resolve_skill_config
+
+    base = LLMConfig(provider="google", api_key="g", model="gemini-3.5-flash-lite", fallback_model="gemini-3.6-flash", enabled=True)
+    assert resolve_skill_config(base, "default") is base
+    better = resolve_skill_config(base, "better")
+    assert (better.model, better.fallback_model) == BETTER_MODELS["google"]
+    assert better.provider == "google" and better.api_key == "g" and better.fallback_provider == ""
+    # a provider without a preset keeps the user's models
+    plain = LLMConfig(provider="openai_compatible", api_key="k", model="m", enabled=True)
+    assert resolve_skill_config(plain, "better") is plain
+
+    custom = {"provider": "openrouter", "model": "anthropic/claude-sonnet-5.5", "fallback_provider": "google", "fallback_model": "gemini-3.5-flash-lite"}
+    cfg = resolve_skill_config(base, "custom", custom, {"openrouter": "or", "google": "g"})
+    assert (cfg.provider, cfg.api_key, cfg.model) == ("openrouter", "or", "anthropic/claude-sonnet-5.5")
+    assert (cfg.fallback_provider, cfg.fallback_api_key, cfg.fallback_model) == ("google", "g", "gemini-3.5-flash-lite")
+    # no key for the chosen provider: fall back to the Online AI settings instead of failing
+    assert resolve_skill_config(base, "custom", custom, {}) is base
+    # empty custom fields mean "use the global ones"
+    assert resolve_skill_config(base, "custom", {}, {}).model == "gemini-3.5-flash-lite"

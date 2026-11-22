@@ -411,3 +411,31 @@ def test_ok_button_is_the_primary_style_when_the_theme_has_one(window):
     ok = next(w for w in _all(win.root) if w.winfo_class() == "TButton" and w.cget("text") == "OK")
     expected = "Accent.TButton" if settings_ui._has_style("Accent.TButton") else "TButton"
     assert str(ok.cget("style")) == expected
+
+
+def test_switching_to_openrouter_keeps_each_providers_key_and_models(window):
+    win, _ = window
+    win.api_key.set("google-key")
+    win._provider_display.set(settings_ui.PROVIDER_LABELS[settings_ui.PROVIDER_OPENROUTER])
+    win._on_provider()
+    assert win.api_key.get() == ""
+    assert win.model.get() == settings_ui.DEFAULT_OPENROUTER_MODEL
+    assert win.fallback_model.get() == settings_ui.DEFAULT_OPENROUTER_FALLBACK_MODEL  # the fallback followed the main provider
+    win.api_key.set("or-key")
+    win._provider_display.set(settings_ui.PROVIDER_LABELS[settings_ui.PROVIDER_GOOGLE])
+    win._on_provider()
+    assert win.api_key.get() == "google-key"
+    data = win._collect() if hasattr(win, "_collect") else None
+    assert win._keys["openrouter"] == "or-key"
+
+
+def test_fallback_can_use_a_different_provider_with_its_own_key_box(window):
+    win, _ = window
+    assert win.fallback_key_entry.winfo_manager() == ""  # same provider: no second key box
+    win._fallback_provider_display.set(settings_ui.PROVIDER_LABELS[settings_ui.PROVIDER_OPENROUTER])
+    win._on_fallback_provider()
+    assert win.fallback_key_entry.winfo_manager() == "grid"
+    win.fallback_key.set("or-key")
+    llm = win._current_llm(include_prompts=False)
+    assert (llm.fallback_provider, llm.fallback_api_key) == ("openrouter", "or-key")
+    assert llm.provider == "google"

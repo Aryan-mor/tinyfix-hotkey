@@ -26,3 +26,15 @@ def test_dpapi_file_round_trip_and_clear(tmp_path: Path):
     save_api_key(path, "")
     assert not path.exists()
     assert load_api_key(path) == ""
+
+
+def test_keys_are_kept_per_provider_and_old_files_still_load(tmp_path):
+    from secret_store import load_api_keys, save_api_key, save_api_keys
+
+    path = tmp_path / "secrets.dpapi"
+    save_api_key(path, "old-google-key")  # a file written by an older version
+    assert load_api_keys(path, "google") == {"google": "old-google-key"}
+    save_api_keys(path, {"google": "g", "openrouter": "o", "openai_compatible": ""})
+    assert load_api_keys(path) == {"google": "g", "openrouter": "o"}
+    save_api_keys(path, {})
+    assert not path.exists()

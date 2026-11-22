@@ -29,6 +29,8 @@ from prompts import (
     render_prompt,
 )
 
+from llm_client import MODEL_BETTER, MODEL_CUSTOM, MODEL_DEFAULT, MODEL_MODES
+
 SKILLS_VERSION = 1
 SKILLS_FILENAME = "skills.json"
 
@@ -119,8 +121,19 @@ class Skill:
     enabled: bool = True
     builtin: bool = False
     offline_fallback: bool = False
+    # Which LLM runs this skill: the Online AI settings, a stronger preset, or the skill's own provider and models.
+    model_mode: str = MODEL_DEFAULT
+    model_provider: str = ""
+    model: str = ""
+    model_fallback_provider: str = ""
+    model_fallback: str = ""
 
     def __post_init__(self) -> None:
+        self.model_mode = self.model_mode if self.model_mode in MODEL_MODES else MODEL_DEFAULT
+        self.model_provider = (self.model_provider or "").strip()
+        self.model = (self.model or "").strip()
+        self.model_fallback_provider = (self.model_fallback_provider or "").strip()
+        self.model_fallback = (self.model_fallback or "").strip()
         self.id = (self.id or "").strip() or str(uuid.uuid4())
         self.name = (self.name or "").strip() or "New skill"
         self.input_mode = normalize_input_mode(self.input_mode)
@@ -155,6 +168,19 @@ class Skill:
             "enabled": self.enabled,
             "builtin": self.builtin,
             "offline_fallback": self.offline_fallback,
+            "model_mode": self.model_mode,
+            "model_provider": self.model_provider,
+            "model": self.model,
+            "model_fallback_provider": self.model_fallback_provider,
+            "model_fallback": self.model_fallback,
+        }
+
+    def model_custom(self) -> dict:
+        return {
+            "provider": self.model_provider,
+            "model": self.model,
+            "fallback_provider": self.model_fallback_provider,
+            "fallback_model": self.model_fallback,
         }
 
     @classmethod
@@ -169,6 +195,12 @@ class Skill:
             enabled=bool(raw.get("enabled", True)),
             builtin=bool(raw.get("builtin", False)),
             offline_fallback=bool(raw.get("offline_fallback", False)),
+            # A skills.json from before per-skill models: Improve prompt gets the stronger model, the rest keep default.
+            model_mode=str(raw.get("model_mode") or (MODEL_BETTER if raw.get("id") == "improve-prompt" else MODEL_DEFAULT)),
+            model_provider=str(raw.get("model_provider") or ""),
+            model=str(raw.get("model") or ""),
+            model_fallback_provider=str(raw.get("model_fallback_provider") or ""),
+            model_fallback=str(raw.get("model_fallback") or ""),
         )
 
 
@@ -292,6 +324,7 @@ def default_skills(
             enabled=True,
             builtin=True,
             offline_fallback=False,
+            model_mode=MODEL_BETTER,
         ),
     ]
 

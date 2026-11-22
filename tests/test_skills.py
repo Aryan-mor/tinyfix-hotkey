@@ -384,3 +384,17 @@ def test_fix_prompt_requires_capitalization():
     from prompts import DEFAULT_FIX_PROMPT
 
     assert "Capitalize the first letter of every sentence" in DEFAULT_FIX_PROMPT
+
+
+def test_improve_prompt_defaults_to_the_better_model_and_old_files_get_it_too():
+    from skills import Skill, default_skills
+
+    by_id = {s.id: s for s in default_skills()}
+    assert by_id["improve-prompt"].model_mode == "better"
+    assert by_id["fix"].model_mode == "default"
+    old = Skill.from_dict({"id": "improve-prompt", "name": "Improve prompt"})  # skills.json from before per-skill models
+    assert old.model_mode == "better"
+    assert Skill.from_dict({"id": "fix", "name": "Fix"}).model_mode == "default"
+    custom = Skill.from_dict(Skill(id="x", name="X", model_mode="custom", model_provider="openrouter", model="a/b",
+                                   model_fallback_provider="google", model_fallback="g").to_dict())
+    assert custom.model_custom() == {"provider": "openrouter", "model": "a/b", "fallback_provider": "google", "fallback_model": "g"}

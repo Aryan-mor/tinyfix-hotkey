@@ -109,7 +109,12 @@ A **Sensitivity** submenu in the tray (and the Settings tab) changes how eagerly
 In **Settings → Online AI** you can add a provider:
 
 - **Google AI Studio (Gemini)** — paste an API key from [Google AI Studio](https://aistudio.google.com/apikey). TinyFix calls the native Gemini `generateContent` REST API.
-- **OpenAI-compatible** — base URL + API key. This covers OpenAI, OpenRouter, Groq, Ollama, LM Studio, and any other `/v1/chat/completions` server.
+- **OpenRouter** — one key for GPT, DeepSeek, Gemini, Claude and more. **Find best models** times the newest cheap models on typo fixes (English and Persian) and picks the fastest correct one as main and the runner-up as fallback. A test run costs well under a cent.
+- **OpenAI-compatible** — base URL + API key. This covers OpenAI, Groq, Ollama, LM Studio, and any other `/v1/chat/completions` server.
+
+The **fallback** model can sit on a different provider than the main one (for example Google main, OpenRouter fallback), each with its own saved key. When both online models fail, TinyFix uses the offline engine and bounces a red alert icon in the tray.
+
+Each skill can use its own models: **Default** (the Online AI settings), **Better model** (the default for Improve prompt: `gemini-3.6-flash` then the free `gemini-3.5-flash-lite` on Google, Claude Sonnet then Gemini Flash on OpenRouter), or **Custom**.
 
 The default Gemini model is `gemini-3.5-flash-lite`. Refresh the model list from the provider when possible, or type a model name. An existing `llm_model` in `config.ini` is left unchanged. **Test** sends a tiny typo-correction request; only after a successful test can you tick **Use online model**. The default timeout is **2 seconds**. If the request times out or errors, TinyFix silently falls back to the built-in offline engine and logs the reason (never the key, never your text). With no key, everything works as it does today.
 

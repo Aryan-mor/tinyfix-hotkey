@@ -458,3 +458,25 @@ def test_skills_list_scrolls_with_many_skills_and_new_skill_stays_reachable(tk_r
         assert p.new_btn.winfo_ismapped()  # the New skill button never scrolls away
     finally:
         p.host.destroy()
+
+
+def test_skill_editor_shows_and_saves_the_model_choice(page, tk_root):
+    index = next(i for i, s in enumerate(page.skills) if s.id == SKILL_IMPROVE_PROMPT)
+    page.open_editor(index)
+    pump(tk_root)
+    assert "Better model" in page.f_model_mode.get()
+    assert page.model_hint.winfo_manager() == "grid" and page.custom_model.winfo_manager() == ""
+    page.f_model_mode.set("Custom (choose below)")
+    page._sync_model_fields()
+    assert page.custom_model.winfo_manager() == "grid"
+    page.f_provider.set("OpenRouter")
+    page.f_model.set("anthropic/claude-sonnet-5.5")
+    page.f_fb_provider.set("Google AI Studio (Gemini)")
+    page.f_fb_model.set("gemini-3.5-flash-lite")
+    assert page.save_editing()
+    saved = page.skills[index]
+    assert saved.model_mode == "custom"
+    assert saved.model_custom() == {
+        "provider": "openrouter", "model": "anthropic/claude-sonnet-5.5",
+        "fallback_provider": "google", "fallback_model": "gemini-3.5-flash-lite",
+    }

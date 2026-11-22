@@ -94,3 +94,11 @@ def test_improve_prompt_keeps_numbered_lists():
     text = DEFAULT_IMPROVE_PROMPT.lower()
     assert "preserve structure" in text
     assert "1. 2. 3." in DEFAULT_IMPROVE_PROMPT
+
+
+def test_old_fix_default_is_upgraded_and_new_one_checks_every_word():
+    from prompts import DEFAULT_FIX_PROMPT, LEGACY_FIX_PROMPTS
+
+    assert "Check every word" in DEFAULT_FIX_PROMPT
+    assert DEFAULT_FIX_PROMPT.strip() not in {p.strip() for p in LEGACY_FIX_PROMPTS}
+    assert any("Check every word" not in p and "No-Slop" in p and "Capitalize the first letter" in p for p in LEGACY_FIX_PROMPTS)

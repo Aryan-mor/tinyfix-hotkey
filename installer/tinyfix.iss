@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.5.7"
+#define MyAppVersion "1.5.9"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -57,7 +57,7 @@ Name: "{group}\Uninstall TinyFix"; Filename: "{uninstallexe}"
 Name: "{userstartup}\TinyFix"; Filename: "{app}\{#MyAppExeName}"; Tasks: autostart; Comment: "TinyFix Hotkey"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch TinyFix"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch TinyFix"; Flags: nowait postinstall skipifsilent; Check: ShowLaunchCheckbox
 
 [InstallDelete]
 ; Older versions shipped onnxruntime, numpy and Pillow inside _internal. Upgrades only overwrite files,
@@ -95,6 +95,30 @@ var
   ChosenHotkeyAll: String;
   PrefillDone: Boolean;
   AppWasRunning: Boolean;
+
+function IsUpgrade: Boolean;
+begin
+  { An earlier TinyFix is already in the install folder (Setup reuses the folder it was installed to). }
+  Result := FileExists(ExpandConstant('{app}\{#MyAppExeName}'));
+end;
+
+function ShowLaunchCheckbox: Boolean;
+begin
+  { An upgrade of a running TinyFix relaunches it by itself; a second copy would only open Settings. }
+  Result := not (IsUpgrade and AppWasRunning);
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  { Updating is one click: no folder, license, shortcut, task or summary pages. Settings are kept as they are. }
+  if not IsUpgrade then Exit;
+  if (PageID = wpSelectDir) or (PageID = wpLicense) or (PageID = wpInfoBefore) or (PageID = wpSelectTasks) or
+     (PageID = wpSelectProgramGroup) or (PageID = wpReady) then
+    Result := True;
+  if (HotkeyPage <> nil) and (PageID = HotkeyPage.ID) then
+    Result := True;
+end;
 
 function GetCommandlineParam(const Name: String): String;
 var
@@ -492,6 +516,13 @@ procedure CurPageChanged(CurPageID: Integer);
 var
   Existing: String;
 begin
+  if (CurPageID = wpWelcome) and IsUpgrade then
+  begin
+    WizardForm.WelcomeLabel2.Caption :=
+      'TinyFix is already installed. Click Update to install {#MyAppVersion}.' + #13#10#13#10 +
+      'Your shortcuts, online model settings, API keys and skills stay exactly as they are.';
+    WizardForm.NextButton.Caption := 'Update';
+  end;
   if (HotkeyPage <> nil) and (CurPageID = HotkeyPage.ID) and (not PrefillDone) then
   begin
     PrefillDone := True;
@@ -517,7 +548,7 @@ begin
   Cmd := Trim(GetCommandlineParam(CmdName));
   if Cmd <> '' then
     Result := Cmd
-  else if WizardSilent then
+  else if WizardSilent or IsUpgrade then
   begin
     Existing := ReadExistingIni(ExistingKey, '');
     if Existing <> '' then

@@ -152,3 +152,31 @@ def load_api_key(path: Path) -> str:
         return unprotect_bytes(path.read_bytes()).decode("utf-8")
     except Exception:
         return ""
+
+
+def load_api_keys(path: Path, legacy_provider: str = "google") -> dict[str, str]:
+    """All saved keys by provider. A file from an older version holds one bare key, which belongs to legacy_provider."""
+    import json
+
+    raw = load_api_key(path)
+    if not raw:
+        return {}
+    if raw.lstrip().startswith("{"):
+        try:
+            data = json.loads(raw)
+            keys = data.get("keys") if isinstance(data, dict) else None
+            if isinstance(keys, dict):
+                return {str(name): str(value) for name, value in keys.items() if value}
+        except ValueError:
+            pass
+    return {legacy_provider: raw}
+
+
+def save_api_keys(path: Path, keys: dict[str, str]) -> None:
+    import json
+
+    keys = {name: value for name, value in keys.items() if value}
+    if not keys:
+        save_api_key(path, "")
+        return
+    save_api_key(path, json.dumps({"keys": keys}))

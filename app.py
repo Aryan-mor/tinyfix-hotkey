@@ -35,9 +35,9 @@ from hotkey_util import (
     disabled_hotkey,
     parse_hotkey,
 )
-from llm_client import DEFAULT_GOOGLE_FALLBACK_MODEL, LLMConfig, LLMError, LLMTimeout, correct_with_fallback, resolve_google_model, run_skill_online, translate_online
-from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
-from secret_store import default_secrets_path, load_api_key, save_api_key
+from llm_client import DEFAULT_GOOGLE_FALLBACK_MODEL, DEFAULT_OPENROUTER_FALLBACK_MODEL, RETIRED_FALLBACK_MODELS, LLMConfig, LLMError, LLMTimeout, correct_with_fallback, resolve_google_model, resolve_skill_config, run_skill_online, translate_online
+from prompts import DEFAULT_FIX_PROMPT, LEGACY_FIX_PROMPTS, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
+from secret_store import default_secrets_path, load_api_keys, save_api_keys
 from settings_ui import SettingsData, SettingsHooks, open_settings
 from skill_menu import get_foreground_hwnd, restore_foreground, show_skill_menu
 from skills import (
@@ -65,7 +65,7 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.5.7"
+APP_VERSION = "1.5.9"
 MUTEX_NAME = "Local\\TinyFixHotkey" + os.environ.get("TINYFIX_MUTEX_SUFFIX", "")  # the suffix is for tests only
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
@@ -428,11 +428,32 @@ def _write_parser(parser: configparser.ConfigParser) -> None:
         parser.write(handle)
 
 
-def _read_prompt_file(path: Path, default: str) -> str:
+provider_keys: dict[str, str] = {}  # every provider's saved key, so switching provider in Settings keeps the others
+
+
+def _load_provider_keys(legacy_provider: str) -> dict[str, str]:
+    global provider_keys
+    provider_keys = load_api_keys(SECRETS_PATH, legacy_provider)
+    return provider_keys
+
+
+def _saved_fallback_provider(parser) -> str:
+    return parser.get(CONFIG_SECTION, "llm_fallback_provider", fallback="").strip()
+
+
+def _current_fallback_model(parser, provider: str = "google") -> str:
+    default = DEFAULT_OPENROUTER_FALLBACK_MODEL if provider == "openrouter" else DEFAULT_GOOGLE_FALLBACK_MODEL
+    saved = parser.get(CONFIG_SECTION, "llm_fallback_model", fallback=default).strip()
+    return default if saved in RETIRED_FALLBACK_MODELS else saved
+
+
+def _read_prompt_file(path: Path, default: str, legacy: tuple[str, ...] = ()) -> str:
     try:
         if path.exists():
             text = path.read_text(encoding="utf-8")
             if text.strip():
+                if text.strip() in {p.strip() for p in legacy}:
+                    return default  # an unedited older default: upgrade it
                 return text
     except Exception:
         logging.exception("Could not read %s", path)
@@ -500,20 +521,23 @@ def load_settings() -> None:
             model = raw_model
         llm_config = LLMConfig(
             provider=provider,
-            api_key=load_api_key(SECRETS_PATH),
+            api_key=_load_provider_keys(provider).get(provider, ""),
             model=model,
-            fallback_model=parser.get(CONFIG_SECTION, "llm_fallback_model", fallback=DEFAULT_GOOGLE_FALLBACK_MODEL).strip(),
+            fallback_model=_current_fallback_model(parser, provider),
+            fallback_provider=_saved_fallback_provider(parser),
+            fallback_api_key=provider_keys.get(_saved_fallback_provider(parser), ""),
             base_url=parser.get(CONFIG_SECTION, "llm_base_url", fallback=""),
             timeout=max(1.0, min(30.0, timeout)),
             enabled=_parse_bool(parser.get(CONFIG_SECTION, "llm_enabled", fallback="false")),
-            fix_prompt=_read_prompt_file(PROMPT_FIX_PATH, DEFAULT_FIX_PROMPT),
+            fix_prompt=_read_prompt_file(PROMPT_FIX_PATH, DEFAULT_FIX_PROMPT, LEGACY_FIX_PROMPTS),
             translate_prompt=_read_prompt_file(PROMPT_TRANSLATE_PATH, DEFAULT_TRANSLATE_PROMPT),
             target_language=parser.get(CONFIG_SECTION, "llm_target_language", fallback=DEFAULT_TARGET_LANGUAGE)
             or DEFAULT_TARGET_LANGUAGE,
         )
     else:
-        llm_config.api_key = load_api_key(SECRETS_PATH)
-        llm_config.fix_prompt = _read_prompt_file(PROMPT_FIX_PATH, DEFAULT_FIX_PROMPT)
+        llm_config.api_key = _load_provider_keys(llm_config.provider).get(llm_config.provider, "")
+        llm_config.fallback_api_key = provider_keys.get(llm_config.fallback_provider, "")
+        llm_config.fix_prompt = _read_prompt_file(PROMPT_FIX_PATH, DEFAULT_FIX_PROMPT, LEGACY_FIX_PROMPTS)
         llm_config.translate_prompt = _read_prompt_file(PROMPT_TRANSLATE_PATH, DEFAULT_TRANSLATE_PROMPT)
     _load_skill_store_from_disk()
 
@@ -577,10 +601,12 @@ def save_settings(
         parser[CONFIG_SECTION]["llm_base_url"] = llm_config.base_url
         parser[CONFIG_SECTION]["llm_timeout"] = str(llm_config.timeout)
         parser[CONFIG_SECTION]["llm_fallback_model"] = llm_config.fallback_model
+        parser[CONFIG_SECTION]["llm_fallback_provider"] = llm_config.fallback_provider
         parser[CONFIG_SECTION]["llm_enabled"] = "true" if llm_config.enabled else "false"
         parser[CONFIG_SECTION]["llm_target_language"] = llm_config.target_language
         # Never write the API key to config.ini.
-        save_api_key(SECRETS_PATH, llm_config.api_key)
+        provider_keys[llm_config.provider] = llm_config.api_key
+        save_api_keys(SECRETS_PATH, provider_keys)
         _write_prompt_file(PROMPT_FIX_PATH, llm_config.fix_prompt or DEFAULT_FIX_PROMPT)
         _write_prompt_file(PROMPT_TRANSLATE_PATH, llm_config.translate_prompt or DEFAULT_TRANSLATE_PROMPT)
     _write_parser(parser)
@@ -839,11 +865,12 @@ def run_skill(skill: Skill, target_hwnd: int | None = None) -> None:
             return
         notify("TinyFix", f"Running {skill.name}…")
         try:
+            skill_config = _skill_llm_config(skill)
             if skill.offline_fallback:
-                result, origin = correct_with_fallback(selected, engine, llm_config)
+                result, origin = correct_with_fallback(selected, engine, skill_config)
             else:
                 result = run_skill_online(
-                    llm_config,
+                    skill_config,
                     skill.prompt,
                     selected,
                     language=llm_config.target_language,
@@ -852,28 +879,36 @@ def run_skill(skill: Skill, target_hwnd: int | None = None) -> None:
         except LLMTimeout:
             logging.info("Skill timed out; leaving the text unchanged (%s)", source)
             restore_clipboard(saved)
-            notify("TinyFix", f"{skill.name} timed out; the text was left unchanged")
+            notify_failure("TinyFix", f"{skill.name} timed out; the text was left unchanged")
             return
         except LLMError as exc:
             logging.info("Skill failed; leaving the text unchanged (%s): %s", source, exc)
             restore_clipboard(saved)
-            notify("TinyFix", f"{skill.name} failed; the text was left unchanged")
+            notify_failure("TinyFix", f"{skill.name} failed; the text was left unchanged")
             return
         except Exception:
             logging.exception("Skill failed (%s)", source)
             restore_clipboard(saved)
-            notify("TinyFix", f"{skill.name} failed; the text was left unchanged")
+            notify_failure("TinyFix", f"{skill.name} failed; the text was left unchanged")
             return
         if not result:
             restore_clipboard(saved)
             logging.info("Skill early return: empty result (length=%s, %s)", len(selected), source)
-            notify("TinyFix", f"{skill.name} failed; the text was left unchanged")
+            notify_failure("TinyFix", f"{skill.name} failed; the text was left unchanged")
             return
         if origin == "unsupported":
             restore_clipboard(saved)
             logging.info("Skill early return: text is not English and no online model is on (%s)", source)
             notify("TinyFix", NOT_ENGLISH_MESSAGE)
             return
+        if origin == "fallback":
+            # Both online models failed and only the offline engine answered: tell the user.
+            logging.info("Online models failed; the offline engine handled %s", source)
+            notify_failure("TinyFix", "The online model failed; used the offline engine instead")
+            if result == selected:
+                restore_clipboard(saved)
+                logging.info("Skill early return: unchanged after offline fallback (%s)", source)
+                return
         if result == selected:
             restore_clipboard(saved)
             logging.info("Skill early return: unchanged (length=%s, %s)", len(selected), source)
@@ -897,12 +932,17 @@ def run_skill(skill: Skill, target_hwnd: int | None = None) -> None:
         busy.release()
 
 
+def _skill_llm_config(skill: Skill) -> LLMConfig:
+    """The model settings this skill runs with (see Skill.model_mode)."""
+    return resolve_skill_config(llm_config, skill.model_mode, skill.model_custom(), provider_keys)
+
+
 def test_skill_text(skill: Skill, sample: str) -> str:
     if skill.offline_fallback:
-        result, _origin = correct_with_fallback(sample, engine, llm_config)
+        result, _origin = correct_with_fallback(sample, engine, _skill_llm_config(skill))
         return result
     return run_skill_online(
-        llm_config,
+        _skill_llm_config(skill),
         skill.prompt,
         sample,
         language=llm_config.target_language,
@@ -1029,17 +1069,17 @@ def on_translate_hotkey() -> None:
         except (LLMTimeout, LLMError) as exc:
             logging.info("Translation failed; leaving the text unchanged: %s", exc)
             restore_clipboard(saved)
-            notify("TinyFix", "Translation failed; the text was left unchanged")
+            notify_failure("TinyFix", "Translation failed; the text was left unchanged")
             return
         except Exception:
             logging.exception("Translation failed")
             restore_clipboard(saved)
-            notify("TinyFix", "Translation failed; the text was left unchanged")
+            notify_failure("TinyFix", "Translation failed; the text was left unchanged")
             return
         if not translated:
             restore_clipboard(saved)
             logging.info("Hotkey early return: empty translation (length=%s, %s)", len(selected), source)
-            notify("TinyFix", "Translation failed; the text was left unchanged")
+            notify_failure("TinyFix", "Translation failed; the text was left unchanged")
             return
         if translated == selected:
             restore_clipboard(saved)
@@ -1295,6 +1335,7 @@ def _open_settings_on_ui_thread() -> None:
         translate_select_all=translate_select_all,
         sensitivity=current_sensitivity,
         llm=llm_config,
+        provider_keys=dict(provider_keys),
         last_update_check=_last_update_check_value(),
         skills=[Skill.from_dict(skill.to_dict()) for skill in skill_store.skills],
         skill_menu_hotkey=current_hotkey_menu,
@@ -1375,6 +1416,17 @@ def queue_ui(action: str, payload: object = None) -> None:
             tray_icon.update_menu()
         except Exception:
             pass
+
+
+def notify_failure(title: str, message: str) -> None:
+    """Like notify, and also bounce a red alert icon in the tray so the user sees something failed."""
+    notify(title, message)
+    icon = tray_icon
+    if icon is not None:
+        try:
+            icon.set_alert()
+        except Exception:
+            logging.exception("Could not show the tray alert")
 
 
 def notify(title: str, message: str) -> None:
@@ -1723,7 +1775,7 @@ def _last_update_check_value() -> str:
 
 
 def apply_settings_data(data: SettingsData) -> None:
-    global translate_select_all, llm_config, skill_store, current_hotkey_menu
+    global translate_select_all, llm_config, skill_store, current_hotkey_menu, provider_keys
     started = time.perf_counter()
     logging.info("Settings save starting")
     new_sensitivity = normalize_sensitivity(data.sensitivity)
@@ -1743,6 +1795,8 @@ def apply_settings_data(data: SettingsData) -> None:
     _sync_legacy_from_skills()
     translate_select_all = data.translate_select_all
     llm_config = data.llm
+    provider_keys = {**provider_keys, **{k: v for k, v in (data.provider_keys or {}).items()}}
+    llm_config.fallback_api_key = provider_keys.get(llm_config.fallback_provider, "")
     apply_hotkeys(data.hotkey, data.hotkey_all, data.hotkey_translate, persist=False)
     logging.info("Settings save: hotkeys posted in %.0fms", (time.perf_counter() - started) * 1000)
     try:
@@ -1902,7 +1956,7 @@ def on_fix_clipboard(_item=None, _icon=None) -> None:
                 corrected, source = correct_with_fallback(text, engine, llm_config)
             except Exception:
                 logging.exception("Clipboard fix failed")
-                notify("TinyFix", "Could not correct the clipboard")
+                notify_failure("TinyFix", "Could not correct the clipboard")
                 return
             if source == "unsupported":
                 message, corrected = NOT_ENGLISH_MESSAGE, None
@@ -1928,7 +1982,7 @@ def on_fix_clipboard(_item=None, _icon=None) -> None:
         if corrected is not None:
             if not write_unicode_text(corrected):
                 logging.info("Clipboard fix early return: clipboard write failed (length=%s)", 0 if text is None else len(text))
-                notify("TinyFix", "Could not write the clipboard")
+                notify_failure("TinyFix", "Could not write the clipboard")
                 return
             logging.info("Clipboard fixed (%s, length=%s)", message, len(corrected))
         else:
@@ -1952,6 +2006,18 @@ def working_icon_paths() -> list[Path]:
     found: list[Path] = []
     for number in (1, 2, 3):
         name = f"tinyfix-working-{number}.ico"
+        for base in (RESOURCES, ROOT, ROOT / "assets"):
+            if (base / name).exists():
+                found.append(base / name)
+                break
+    return found
+
+
+def alert_icon_paths() -> list[Path]:
+    """The red bouncing "!" frames the tray shows when something fails."""
+    found: list[Path] = []
+    for number in range(1, 9):
+        name = f"tinyfix-alert-{number}.ico"
         for base in (RESOURCES, ROOT, ROOT / "assets"):
             if (base / name).exists():
                 found.append(base / name)
@@ -2001,7 +2067,7 @@ def setup_tray() -> None:
         tray.MenuItem("About TinyFix", open_about_window),
         tray.MenuItem("Exit", lambda *_: request_stop()),
     ]
-    tray_icon = tray.TrayIcon(APP_NAME, icon_path(), tray_title(), menu, working_icon_paths=working_icon_paths())
+    tray_icon = tray.TrayIcon(APP_NAME, icon_path(), tray_title(), menu, working_icon_paths=working_icon_paths(), alert_icon_paths=alert_icon_paths())
 
     def setup(icon: tray.TrayIcon) -> None:
         icon.visible = True

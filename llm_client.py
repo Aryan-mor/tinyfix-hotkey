@@ -20,10 +20,17 @@ from prompts import (
 
 PROVIDER_GOOGLE = "google"
 PROVIDER_OPENAI = "openai_compatible"
-PROVIDERS = (PROVIDER_GOOGLE, PROVIDER_OPENAI)
+PROVIDER_OPENROUTER = "openrouter"
+PROVIDERS = (PROVIDER_GOOGLE, PROVIDER_OPENROUTER, PROVIDER_OPENAI)
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+# Cheap, fast, good at text: a Gemini Flash-Lite main and a different vendor (DeepSeek) as the fallback.
+DEFAULT_OPENROUTER_MODEL = "google/gemini-3.5-flash-lite"
+DEFAULT_OPENROUTER_FALLBACK_MODEL = "deepseek/deepseek-v4.1-flash"
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
-DEFAULT_GOOGLE_FALLBACK_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_GOOGLE_FALLBACK_MODEL = "gemini-3.6-flash"
+# Older defaults that Google has since retired (HTTP 404 "no longer available"); a saved copy is replaced by the default.
+RETIRED_FALLBACK_MODELS = ("gemini-2.5-flash-lite", "gemini-flash-lite-latest")
 # After the main model fails, use the fallback model first for this many seconds before trying the main one again.
 FALLBACK_WINDOW_SECONDS = 120.0
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
@@ -98,6 +105,9 @@ class LLMConfig:
     api_key: str = ""
     model: str = DEFAULT_GOOGLE_MODEL
     fallback_model: str = DEFAULT_GOOGLE_FALLBACK_MODEL
+    # The fallback can live on another provider (Google main, OpenRouter fallback, ...). "" means the main provider.
+    fallback_provider: str = ""
+    fallback_api_key: str = ""
     base_url: str = ""
     timeout: float = DEFAULT_TIMEOUT
     enabled: bool = False
@@ -109,9 +119,7 @@ class LLMConfig:
     def ready(self) -> bool:
         if not self.enabled or not (self.api_key or "").strip() or not (self.model or "").strip():
             return False
-        if self.provider == PROVIDER_OPENAI:
-            return True
-        return self.provider == PROVIDER_GOOGLE
+        return self.provider in PROVIDERS
 
 
 def _request_json(url: str, payload: dict | None, headers: dict[str, str], timeout: float, api_key: str) -> dict:
@@ -154,6 +162,12 @@ def _gemini_headers(api_key: str) -> dict[str, str]:
     }
 
 
+def openrouter_catalog(timeout: float = 8.0) -> list[dict]:
+    """OpenRouter's public model list (id, price, release time). It needs no key."""
+    payload = _request_json(f"{OPENROUTER_BASE}/models", None, {"User-Agent": USER_AGENT}, timeout, "")
+    return [item for item in payload.get("data") or [] if isinstance(item, dict)]
+
+
 def list_models(config: LLMConfig, timeout: float | None = None) -> list[str]:
     timeout = float(timeout or max(config.timeout, 5))
     if config.provider == PROVIDER_GOOGLE:
@@ -170,6 +184,8 @@ def list_models(config: LLMConfig, timeout: float | None = None) -> list[str]:
             if name:
                 names.append(name)
         return names
+    if config.provider == PROVIDER_OPENROUTER:
+        return [str(item.get("id") or "") for item in openrouter_catalog(timeout) if item.get("id")]
     if config.provider == PROVIDER_OPENAI:
         base = _normalize_openai_base(config.base_url)
         url = f"{base}/models"
@@ -211,7 +227,7 @@ def _complete_gemini(config: LLMConfig, prompt: str, timeout: float) -> str:
 
 
 def _complete_openai(config: LLMConfig, prompt: str, timeout: float) -> str:
-    base = _normalize_openai_base(config.base_url)
+    base = OPENROUTER_BASE if config.provider == PROVIDER_OPENROUTER else _normalize_openai_base(config.base_url)
     url = f"{base}/chat/completions"
     headers = {
         "Content-Type": "application/json",
@@ -248,36 +264,116 @@ def _fallback_worthy(exc: LLMError) -> bool:
     message = str(exc)
     if message.startswith("HTTP "):
         code = message[5:8]
-        return code in {"429", "500", "502", "503", "504"} or code.startswith("5")
+        return code in {"402", "404", "429"} or code.startswith("5")
     return message.startswith("Network error") or "no candidates" in message or "empty text" in message
 
 
-def _complete_google_with_fallback(config: LLMConfig, prompt: str, timeout: float) -> str:
+# Per-skill model choice. "default" uses the Online AI settings, "better" uses a stronger model for work where
+# quality matters more than speed (improving prompts), "custom" uses the skill's own provider and models.
+MODEL_DEFAULT, MODEL_BETTER, MODEL_CUSTOM = "default", "better", "custom"
+MODEL_MODES = (MODEL_DEFAULT, MODEL_BETTER, MODEL_CUSTOM)
+# (main, fallback) per provider. Google: a stronger Flash model, then the free Flash-Lite model, which has the
+# largest free allowance, so a user on the free tier still gets an answer when the Flash quota runs out.
+BETTER_MODELS = {
+    PROVIDER_GOOGLE: ("gemini-3.6-flash", "gemini-3.5-flash-lite"),
+    PROVIDER_OPENROUTER: ("anthropic/claude-sonnet-5.5", "google/gemini-3.6-flash"),
+}
+
+
+def resolve_skill_config(base: LLMConfig, mode: str, custom: dict | None = None, keys: dict | None = None) -> LLMConfig:
+    """The LLM settings one skill runs with: the global ones, a stronger preset, or the skill's own choice."""
     import dataclasses
+
+    keys = keys or {}
+    if mode == MODEL_BETTER:
+        pair = BETTER_MODELS.get(base.provider)
+        if pair is None:
+            return base
+        return dataclasses.replace(base, model=pair[0], fallback_model=pair[1], fallback_provider="", fallback_api_key="")
+    if mode != MODEL_CUSTOM:
+        return base
+    custom = custom or {}
+    provider = (custom.get("provider") or "").strip() or base.provider
+    if provider not in PROVIDERS:
+        return base
+    key = base.api_key if provider == base.provider else (keys.get(provider) or "").strip()
+    if not key and provider in (PROVIDER_GOOGLE, PROVIDER_OPENROUTER):
+        logger.info("Skill model uses %s but it has no API key; using the Online AI settings", provider)
+        return base
+    same = provider == base.provider
+    main = (custom.get("model") or "").strip() or (base.model if same else _default_model_for(provider))
+    fb_provider = (custom.get("fallback_provider") or "").strip() or provider
+    if fb_provider not in PROVIDERS:
+        fb_provider = provider
+    fb_model = (custom.get("fallback_model") or "").strip()
+    if not fb_model and fb_provider == provider and same:
+        fb_model = base.fallback_model
+    return dataclasses.replace(
+        base,
+        provider=provider,
+        api_key=key,
+        base_url=base.base_url if same else "",
+        model=main,
+        fallback_model=fb_model,
+        fallback_provider="" if fb_provider == provider else fb_provider,
+        fallback_api_key="" if fb_provider == provider else (keys.get(fb_provider) or "").strip(),
+    )
+
+
+def _complete_once(config: LLMConfig, prompt: str, timeout: float) -> str:
+    if config.provider == PROVIDER_GOOGLE:
+        return _complete_gemini(config, prompt, timeout)
+    return _complete_openai(config, prompt, timeout)
+
+
+def _default_model_for(provider: str) -> str:
+    return {PROVIDER_GOOGLE: DEFAULT_GOOGLE_MODEL, PROVIDER_OPENROUTER: DEFAULT_OPENROUTER_MODEL}.get(provider, DEFAULT_OPENAI_MODEL)
+
+
+def fallback_config(config: LLMConfig) -> LLMConfig | None:
+    """The config that answers when the main model fails, or None when there is nothing different to try."""
+    import dataclasses
+
+    backup = (config.fallback_model or "").strip()
+    if not backup:
+        return None
+    provider = (config.fallback_provider or "").strip() or config.provider
+    if provider == config.provider:
+        main = (config.model or _default_model_for(provider)).strip()
+        return None if backup == main else dataclasses.replace(config, model=backup)
+    key = (config.fallback_api_key or "").strip()
+    if not key and provider in (PROVIDER_GOOGLE, PROVIDER_OPENROUTER):
+        return None  # another provider without its key cannot answer
+    return dataclasses.replace(config, provider=provider, api_key=key, model=backup)
+
+
+def _complete_with_fallback(config: LLMConfig, prompt: str, timeout: float) -> str:
+    """Main model first. After it fails in a way another model could fix, the fallback answers for a while."""
     import time
 
-    main = (config.model or DEFAULT_GOOGLE_MODEL).strip()
-    backup = (config.fallback_model or "").strip()
-    if not backup or backup == main:
-        return _complete_gemini(config, prompt, timeout)
-    backup_config = dataclasses.replace(config, model=backup)
-    if _fallback_until.get(main, 0.0) > time.monotonic():
+    backup_config = fallback_config(config)
+    if backup_config is None:
+        return _complete_once(config, prompt, timeout)
+    main = (config.model or _default_model_for(config.provider)).strip()
+    key = f"{config.provider}:{main}"
+    backup = f"{backup_config.provider}:{backup_config.model}"
+    if _fallback_until.get(key, 0.0) > time.monotonic():
         try:
-            return _complete_gemini(backup_config, prompt, timeout)
+            return _complete_once(backup_config, prompt, timeout)
         except LLMError as exc:
             logger.info("Fallback model %s failed (%s); trying %s", backup, exc, main)
-            return _complete_gemini(config, prompt, timeout)
+            return _complete_once(config, prompt, timeout)
     try:
-        return _complete_gemini(config, prompt, timeout)
+        return _complete_once(config, prompt, timeout)
     except LLMError as exc:
         if not _fallback_worthy(exc):
             raise
         logger.info("Model %s failed (%s); using %s for the next %.0f s", main, exc, backup, FALLBACK_WINDOW_SECONDS)
-        _fallback_until[main] = time.monotonic() + FALLBACK_WINDOW_SECONDS
+        _fallback_until[key] = time.monotonic() + FALLBACK_WINDOW_SECONDS
         try:
-            return _complete_gemini(backup_config, prompt, timeout)
+            return _complete_once(backup_config, prompt, timeout)
         except LLMError:
-            _fallback_until.pop(main, None)
+            _fallback_until.pop(key, None)
             raise exc
 
 
@@ -285,14 +381,12 @@ def complete(config: LLMConfig, prompt: str, timeout: float | None = None) -> st
     timeout = float(config.timeout if timeout is None else timeout)
     if timeout <= 0:
         timeout = DEFAULT_TIMEOUT
-    if not (config.api_key or "").strip() and config.provider == PROVIDER_GOOGLE:
+    if not (config.api_key or "").strip() and config.provider in (PROVIDER_GOOGLE, PROVIDER_OPENROUTER):
         raise LLMError("An API key is required")
     if not (config.model or "").strip():
         raise LLMError("A model name is required")
-    if config.provider == PROVIDER_GOOGLE:
-        return _complete_google_with_fallback(config, prompt, timeout)
-    if config.provider == PROVIDER_OPENAI:
-        return _complete_openai(config, prompt, timeout)
+    if config.provider in PROVIDERS:
+        return _complete_with_fallback(config, prompt, timeout)
     raise LLMError(f"Unknown provider: {config.provider}")
 
 
@@ -301,6 +395,8 @@ _SKIP_WORDS = ("image", "tts", "audio", "live", "embedding", "imagen", "vision",
 BENCHMARK_CASES = (
     ("did you go to the shop yesterday", lambda out: out.startswith("Did")),
     ("Hi frinds, i hope you ar well.", lambda out: "friends" in out and "are" in out and " I " in f" {out} "),
+    # A word that exists but is spelled wrongly for its meaning, in a non-English language.
+    ("ببین آقا بهزاد چقدر خاترخواه داره", lambda out: "خاطرخواه" in out),
 )
 MAX_BENCHMARK_MODELS = 6
 
@@ -312,11 +408,49 @@ def benchmark_candidates(names: list[str]) -> list[str]:
         lowered = name.lower()
         if not lowered.startswith("gemini") or "flash" not in lowered:
             continue
-        if any(word in lowered for word in _SKIP_WORDS):
-            continue
+        if any(word in lowered for word in _SKIP_WORDS) or lowered.endswith("-latest"):
+            continue  # "-latest" aliases are moving targets that repeat another model in the list
         picked.append(name)
     picked.sort(key=lambda n: ("lite" not in n.lower(), n))
     return picked[:MAX_BENCHMARK_MODELS]
+
+
+# Vendors worth offering from OpenRouter, and the most a model may cost per million input tokens to be tried.
+OPENROUTER_VENDORS = ("google", "openai", "deepseek", "anthropic", "qwen", "x-ai", "mistralai", "meta-llama")
+OPENROUTER_MAX_PRICE_PER_M = 1.0
+OPENROUTER_PER_VENDOR = 2
+_OPENROUTER_SKIP = _SKIP_WORDS + ("pro", "max", "opus", "ultra", "omni", "reason", "think", "-r1", "deep-research", "search", "coder", "guard", "moderation")
+
+
+def openrouter_candidates(catalog: list[dict], per_vendor: int = OPENROUTER_PER_VENDOR, limit: int = 10) -> list[str]:
+    """Cheap, fast text models worth timing: the newest few per vendor, no free, batch, image, or reasoning variants."""
+    by_vendor: dict[str, list[tuple[int, str]]] = {}
+    for item in catalog:
+        model_id = str(item.get("id") or "")
+        vendor = model_id.split("/", 1)[0]
+        if vendor not in OPENROUTER_VENDORS or ":" in model_id:
+            continue
+        if any(word in model_id.lower() for word in _OPENROUTER_SKIP):
+            continue
+        modalities = (item.get("architecture") or {}).get("output_modalities") or []
+        if modalities != ["text"]:
+            continue
+        try:
+            price = float((item.get("pricing") or {}).get("prompt") or 0) * 1_000_000
+        except (TypeError, ValueError):
+            continue
+        if price <= 0 or price > OPENROUTER_MAX_PRICE_PER_M:
+            continue
+        by_vendor.setdefault(vendor, []).append((int(item.get("created") or 0), model_id))
+    picked: list[str] = []
+    for vendor in OPENROUTER_VENDORS:
+        newest = sorted(by_vendor.get(vendor, []), reverse=True)[:per_vendor]
+        picked.extend(model_id for _created, model_id in newest)
+    picked = picked[:limit]
+    for default in (DEFAULT_OPENROUTER_MODEL, DEFAULT_OPENROUTER_FALLBACK_MODEL):
+        if default not in picked and any(item.get("id") == default for item in catalog):
+            picked.append(default)  # always time the defaults, so the result is never worse than what ships
+    return picked
 
 
 def rank_models(results: dict[str, tuple[bool, float]]) -> list[tuple[str, float]]:
@@ -334,12 +468,16 @@ def find_best_models(config: LLMConfig, timeout: float = 12.0, progress=None, co
     import time
     from concurrent.futures import ThreadPoolExecutor
 
-    if config.provider != PROVIDER_GOOGLE:
-        raise LLMError("Finding the best models only works with Google.")
-    run = complete_fn or _complete_gemini
-    candidates = benchmark_candidates(list_models(config, timeout=timeout))
+    if config.provider == PROVIDER_GOOGLE:
+        run = complete_fn or _complete_gemini
+        candidates = benchmark_candidates(list_models(config, timeout=timeout))
+    elif config.provider == PROVIDER_OPENROUTER:
+        run = complete_fn or _complete_openai
+        candidates = openrouter_candidates(openrouter_catalog(timeout))
+    else:
+        raise LLMError("Finding the best models only works with Google or OpenRouter.")
     if not candidates:
-        raise LLMError("No suitable Gemini models were found for this key.")
+        raise LLMError("No suitable models were found for this key.")
 
     def bench(model: str) -> tuple[str, bool, float]:
         trial = dataclasses.replace(config, model=model)

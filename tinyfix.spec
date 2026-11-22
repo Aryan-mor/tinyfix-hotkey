@@ -48,6 +48,10 @@ for number in (1, 2, 3):
     working = root / "assets" / f"tinyfix-working-{number}.ico"
     if working.exists():
         datas.append((str(working), "."))
+for number in range(1, 9):
+    alert = root / "assets" / f"tinyfix-alert-{number}.ico"
+    if alert.exists():
+        datas.append((str(alert), "."))
 if icon.exists():
     datas.append((str(icon), "."))
 

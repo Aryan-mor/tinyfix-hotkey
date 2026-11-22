@@ -16,6 +16,7 @@ from typing import Callable
 from hotkey_util import Hotkey, parse_hotkey
 from prompts import DEFAULT_TARGET_LANGUAGE, default_prompt_for_skill
 from shortcut_dialog import ShortcutDialog
+from llm_client import MODEL_BETTER, MODEL_CUSTOM, MODEL_DEFAULT
 from skills import (
     INPUT_SELECT_ALL,
     INPUT_SELECTION,
@@ -32,6 +33,23 @@ INPUT_LABELS = {
     INPUT_SELECT_ALL: "Select the whole field first",
 }
 LABEL_TO_MODE = {label: mode for mode, label in INPUT_LABELS.items()}
+MODEL_LABELS = {
+    MODEL_DEFAULT: "Default (the Online AI settings)",
+    MODEL_BETTER: "Better model (best quality, a little slower)",
+    MODEL_CUSTOM: "Custom (choose below)",
+}
+LABEL_TO_MODEL = {label: mode for mode, label in MODEL_LABELS.items()}
+MAIN_PROVIDER_LABELS = {
+    "": "Same as the Online AI settings",
+    "google": "Google AI Studio (Gemini)",
+    "openrouter": "OpenRouter",
+    "openai_compatible": "OpenAI-compatible",
+}
+FALLBACK_PROVIDER_LABELS = {**MAIN_PROVIDER_LABELS, "": "Same provider as the main model"}
+BETTER_HINT = (
+    "Better model: Google uses gemini-3.6-flash, then the free gemini-3.5-flash-lite if its free allowance runs out. "
+    "OpenRouter uses Claude Sonnet, then Gemini Flash."
+)
 NO_SHORTCUT = "No shortcut"
 MUTED = "#555555"
 
@@ -341,6 +359,34 @@ class SkillsPage(ttk.Frame):
         ttk.Button(hot, text="Change…", command=self._change_skill_hotkey).pack(side="left", padx=(8, 0))
         ttk.Button(hot, text="Clear", command=lambda: self.f_hotkey.set(NO_SHORTCUT)).pack(side="left", padx=(6, 0))
 
+        self.f_model_mode = tk.StringVar(value=MODEL_LABELS[MODEL_DEFAULT])
+        self.f_provider = tk.StringVar(value=MAIN_PROVIDER_LABELS[""])
+        self.f_model = tk.StringVar()
+        self.f_fb_provider = tk.StringVar(value=FALLBACK_PROVIDER_LABELS[""])
+        self.f_fb_model = tk.StringVar()
+        ttk.Label(form, text="Model").grid(row=4, column=0, sticky="w", pady=4)
+        self.model_mode_box = ttk.Combobox(form, textvariable=self.f_model_mode, values=list(MODEL_LABELS.values()), state="readonly", width=44)
+        self.model_mode_box.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=4)
+        self.model_mode_box.bind("<<ComboboxSelected>>", lambda _e: self._sync_model_fields())
+        self.model_hint = ttk.Label(form, text=BETTER_HINT, foreground=MUTED, wraplength=600, justify="left")
+        self.model_hint.grid(row=5, column=1, sticky="w", padx=(12, 0))
+        self.custom_model = ttk.Frame(form)
+        self.custom_model.grid(row=6, column=1, sticky="ew", padx=(12, 0), pady=(2, 0))
+        self.custom_model.columnconfigure(1, weight=1)
+        ttk.Label(self.custom_model, text="Provider").grid(row=0, column=0, sticky="w", pady=2)
+        ttk.Combobox(self.custom_model, textvariable=self.f_provider, values=list(MAIN_PROVIDER_LABELS.values()), state="readonly").grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=2)
+        ttk.Label(self.custom_model, text="Main model").grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Entry(self.custom_model, textvariable=self.f_model).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=2)
+        ttk.Label(self.custom_model, text="Fallback provider").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Combobox(self.custom_model, textvariable=self.f_fb_provider, values=list(FALLBACK_PROVIDER_LABELS.values()), state="readonly").grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=2)
+        ttk.Label(self.custom_model, text="Fallback model").grid(row=3, column=0, sticky="w", pady=2)
+        ttk.Entry(self.custom_model, textvariable=self.f_fb_model).grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=2)
+        ttk.Label(
+            self.custom_model,
+            text="Leave a model empty to use the Online AI settings' one. Each provider needs its API key saved in Online AI.",
+            foreground=MUTED, wraplength=520, justify="left",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
         prompt_box = ttk.Frame(page)
         prompt_box.grid(row=2, column=0, sticky="nsew")
         prompt_box.columnconfigure(0, weight=1)
@@ -408,6 +454,12 @@ class SkillsPage(ttk.Frame):
         self.f_enabled.set(bool(draft.enabled))
         self.f_mode.set(INPUT_LABELS.get(draft.input_mode, INPUT_LABELS[INPUT_SELECTION]))
         self.f_hotkey.set(shortcut_text(draft.hotkey))
+        self.f_model_mode.set(MODEL_LABELS.get(draft.model_mode, MODEL_LABELS[MODEL_DEFAULT]))
+        self.f_provider.set(MAIN_PROVIDER_LABELS.get(draft.model_provider, MAIN_PROVIDER_LABELS[""]))
+        self.f_model.set(draft.model)
+        self.f_fb_provider.set(FALLBACK_PROVIDER_LABELS.get(draft.model_fallback_provider, FALLBACK_PROVIDER_LABELS[""]))
+        self.f_fb_model.set(draft.model_fallback)
+        self._sync_model_fields()
         self.prompt.delete("1.0", "end")
         self.prompt.insert("1.0", (draft.prompt or "").rstrip() + "\n")
         self.prompt.edit_reset()
@@ -424,7 +476,23 @@ class SkillsPage(ttk.Frame):
             "mode": LABEL_TO_MODE.get(self.f_mode.get(), INPUT_SELECTION),
             "hotkey": "none" if self.f_hotkey.get() == NO_SHORTCUT else self.f_hotkey.get(),
             "prompt": self.prompt.get("1.0", "end").strip(),
+            "model_mode": LABEL_TO_MODEL.get(self.f_model_mode.get(), MODEL_DEFAULT),
+            "model_provider": _label_to_provider(self.f_provider.get(), MAIN_PROVIDER_LABELS),
+            "model": self.f_model.get().strip(),
+            "model_fallback_provider": _label_to_provider(self.f_fb_provider.get(), FALLBACK_PROVIDER_LABELS),
+            "model_fallback": self.f_fb_model.get().strip(),
         }
+
+    def _sync_model_fields(self) -> None:
+        mode = LABEL_TO_MODEL.get(self.f_model_mode.get(), MODEL_DEFAULT)
+        if mode == MODEL_BETTER:
+            self.model_hint.grid()
+        else:
+            self.model_hint.grid_remove()
+        if mode == MODEL_CUSTOM:
+            self.custom_model.grid()
+        else:
+            self.custom_model.grid_remove()
 
     def _is_dirty(self) -> bool:
         return self._editing is not None and self._form_values() != self._editing_snapshot
@@ -457,6 +525,11 @@ class SkillsPage(ttk.Frame):
         draft.input_mode = values["mode"]
         draft.hotkey = values["hotkey"]
         draft.prompt = values["prompt"] + "\n"
+        draft.model_mode = values["model_mode"]
+        draft.model_provider = values["model_provider"]
+        draft.model = values["model"]
+        draft.model_fallback_provider = values["model_fallback_provider"]
+        draft.model_fallback = values["model_fallback"]
         if draft.enabled:
             clash = self._clash_message(draft.hotkey_obj(), ignore_skill_id=draft.id) if not draft.hotkey_obj().is_disabled else None
             if clash:
@@ -569,6 +642,13 @@ class SkillsPage(ttk.Frame):
     def destroy(self) -> None:
         self._unbind_wheel()
         super().destroy()
+
+
+def _label_to_provider(label: str, labels: dict) -> str:
+    for provider, text in labels.items():
+        if text == label:
+            return provider
+    return ""
 
 
 def default_target_language() -> str:

@@ -22,12 +22,16 @@ from hotkey_util import (
     parse_hotkey,
 )
 from llm_client import (
+    DEFAULT_GOOGLE_FALLBACK_MODEL,
     DEFAULT_GOOGLE_MODEL,
+    DEFAULT_OPENROUTER_FALLBACK_MODEL,
+    DEFAULT_OPENROUTER_MODEL,
     DEFAULT_TIMEOUT,
     LLMConfig,
     LLMError,
     PROVIDER_GOOGLE,
     PROVIDER_OPENAI,
+    PROVIDER_OPENROUTER,
     find_best_models,
     list_models,
     probe_connection,
@@ -76,8 +80,23 @@ DISABLED_LABEL = "None/Disabled"
 KEY_CHOICES_WITH_DISABLED = (DISABLED_LABEL,) + KEY_CHOICES
 PROVIDER_LABELS = {
     PROVIDER_GOOGLE: "Google AI Studio (Gemini)",
+    PROVIDER_OPENROUTER: "OpenRouter (GPT, DeepSeek, Gemini, Claude...)",
     PROVIDER_OPENAI: "OpenAI-compatible",
 }
+# (main model, fallback model) suggested for each provider.
+DEFAULT_MODELS = {
+    PROVIDER_GOOGLE: (DEFAULT_GOOGLE_MODEL, DEFAULT_GOOGLE_FALLBACK_MODEL),
+    PROVIDER_OPENROUTER: (DEFAULT_OPENROUTER_MODEL, DEFAULT_OPENROUTER_FALLBACK_MODEL),
+    PROVIDER_OPENAI: ("", ""),
+}
+OPENROUTER_KEY_URL = "https://openrouter.ai/keys"
+OPENROUTER_STEPS = (
+    "1.  Click \u201cOpen OpenRouter keys\u201d and sign in.\n"
+    "2.  Add a few dollars of credit (cheap models cost a fraction of a cent per fix).\n"
+    "3.  Click \u201cCreate key\u201d, copy it, and paste it in the API key box above.\n"
+    "4.  Click \u201cFind best models\u201d to time GPT, DeepSeek, Gemini, Claude and more, then Test and Save."
+)
+OPENROUTER_PRIVACY = "The key stays on this PC, encrypted by Windows, and is only sent to OpenRouter. Your text goes to OpenRouter and the model vendor you pick."
 
 
 @dataclass
@@ -89,6 +108,7 @@ class SettingsData:
     translate_select_all: bool = False
     sensitivity: str = DEFAULT_SENSITIVITY
     llm: LLMConfig = field(default_factory=LLMConfig)
+    provider_keys: dict = field(default_factory=dict)  # every provider's saved API key
     last_update_check: str = ""
     skills: list[Skill] = field(default_factory=default_skills)
     skill_menu_hotkey: Hotkey = field(default_factory=lambda: parse_hotkey(DEFAULT_HOTKEY_MENU))
@@ -177,15 +197,19 @@ def _has_style(name: str) -> bool:
         return False
 
 
-def friendly_key_error(message: str) -> str:
+def friendly_key_error(message: str, provider: str = PROVIDER_GOOGLE) -> str:
     """Turn a provider error into one plain sentence a first-time user can act on."""
     text = (message or "").lower()
-    if any(word in text for word in ("api key not valid", "api_key_invalid", "401", "403", "permission", "unauthor", "invalid key", "invalid api key")):
-        return "Google did not accept this key. Copy it again from AI Studio and paste the whole key."
+    openrouter = provider == PROVIDER_OPENROUTER
+    name = "OpenRouter" if openrouter else "Google"
+    if any(word in text for word in ("api key not valid", "api_key_invalid", "401", "403", "permission", "unauthor", "invalid key", "invalid api key", "no auth")):
+        return f"{name} did not accept this key. Copy it again from {'openrouter.ai/keys' if openrouter else 'AI Studio'} and paste the whole key."
+    if openrouter and "402" in text:
+        return "OpenRouter says this account has no credit left. Add a few dollars at openrouter.ai/credits and test again."
     if any(word in text for word in ("429", "quota", "rate limit", "resource_exhausted")):
-        return "This key has used up its free allowance for now. Wait a bit and test again."
+        return "This key has used up its free allowance for now. Wait a bit and test again." if not openrouter else "OpenRouter is rate limiting this key for now. Wait a bit and test again."
     if any(word in text for word in ("timed out", "timeout", "getaddrinfo", "urlopen", "name resolution", "unreachable", "connection")):
-        return "Could not reach Google. Check your internet connection and test again."
+        return f"Could not reach {name}. Check your internet connection and test again."
     return message
 
 
@@ -224,8 +248,8 @@ class SettingsWindow:
         self.root = tk.Toplevel(master) if master is not None else tk.Tk()
         self._owns_mainloop = master is None
         self.root.title("TinyFix Settings")
-        self.root.minsize(760, 620)
-        self.root.geometry("800x700+320+60")
+        self.root.minsize(760, 680)
+        self.root.geometry("800x760+320+30")
         try:
             self.root.attributes("-topmost", True)
             self.root.after(400, lambda: self.root.attributes("-topmost", False))
@@ -494,6 +518,16 @@ class SettingsWindow:
 
         self.provider = tk.StringVar(value=self.data.llm.provider or PROVIDER_GOOGLE)
         self.api_key = tk.StringVar(value=self.data.llm.api_key or "")
+        # Each provider keeps its own key and main model while this window is open. The fallback has its own
+        # provider (default: the same as the main one) and, when it differs, its own key.
+        self._shown_provider = self.provider.get()
+        self._keys: dict[str, str] = {**(self.data.provider_keys or {}), self._shown_provider: self.data.llm.api_key or ""}
+        self._main_models: dict[str, str] = {}
+        self._fallback_models: dict[str, str] = {}
+        self.fallback_provider = tk.StringVar(value=self.data.llm.fallback_provider or self._shown_provider)
+        self._fallback_follows_main = not self.data.llm.fallback_provider
+        self._fallback_provider_display = tk.StringVar(value=PROVIDER_LABELS.get(self.fallback_provider.get(), ""))
+        self.fallback_key = tk.StringVar(value=self._keys.get(self.fallback_provider.get(), ""))
         self.show_key = tk.BooleanVar(value=False)
         self.base_url = tk.StringVar(value=self.data.llm.base_url or "")
         initial_model = (self.data.llm.model or "").strip()
@@ -510,7 +544,7 @@ class SettingsWindow:
             tab,
             state="readonly",
             width=36,
-            values=(PROVIDER_LABELS[PROVIDER_GOOGLE], PROVIDER_LABELS[PROVIDER_OPENAI]),
+            values=(PROVIDER_LABELS[PROVIDER_GOOGLE], PROVIDER_LABELS[PROVIDER_OPENROUTER], PROVIDER_LABELS[PROVIDER_OPENAI]),
             textvariable=tk.StringVar(value=PROVIDER_LABELS.get(self.provider.get(), PROVIDER_LABELS[PROVIDER_GOOGLE])),
         )
         # Keep a private mapping: store provider id in self.provider, display labels in the combobox.
@@ -541,6 +575,15 @@ class SettingsWindow:
         ttk.Label(link_row, text=AISTUDIO_KEY_URL, foreground="#0b57d0", cursor="hand2").pack(side="left", padx=(10, 0))
         ttk.Label(self.key_steps, text=KEY_PRIVACY, foreground="#555555", wraplength=500, justify="left").pack(anchor="w", pady=(8, 0))
 
+        self.or_steps = ttk.Frame(help_cell)
+        ttk.Label(self.or_steps, text="How to get an OpenRouter key", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(self.or_steps, text=OPENROUTER_STEPS, justify="left", wraplength=500).pack(anchor="w", pady=(4, 0))
+        or_row = ttk.Frame(self.or_steps)
+        or_row.pack(anchor="w", pady=(8, 0))
+        ttk.Button(or_row, text="Open OpenRouter keys", command=lambda: webbrowser.open(OPENROUTER_KEY_URL)).pack(side="left")
+        ttk.Label(or_row, text=OPENROUTER_KEY_URL, foreground="#0b57d0", cursor="hand2").pack(side="left", padx=(10, 0))
+        ttk.Label(self.or_steps, text=OPENROUTER_PRIVACY, foreground="#555555", wraplength=500, justify="left").pack(anchor="w", pady=(8, 0))
+
         self.base_label = ttk.Label(tab, text="Base URL")
         self.base_label.grid(row=4, column=0, sticky="w")
         self.base_entry = ttk.Entry(tab, textvariable=self.base_url)
@@ -553,31 +596,59 @@ class SettingsWindow:
         ttk.Button(tab, text="Refresh models", command=self._refresh_models).grid(row=5, column=2, padx=(8, 0))
         self.model.trace_add("write", lambda *_: self._invalidate_test())
 
+        ttk.Label(tab, text="Fallback provider").grid(row=6, column=0, sticky="w")
+        self.fallback_provider_box = ttk.Combobox(
+            tab,
+            state="readonly",
+            values=(PROVIDER_LABELS[PROVIDER_GOOGLE], PROVIDER_LABELS[PROVIDER_OPENROUTER], PROVIDER_LABELS[PROVIDER_OPENAI]),
+            textvariable=self._fallback_provider_display,
+        )
+        self.fallback_provider_box.grid(row=6, column=1, columnspan=2, sticky="ew", pady=4)
+        self.fallback_provider_box.bind("<<ComboboxSelected>>", self._on_fallback_provider)
+
         self.fallback_label = ttk.Label(tab, text="Fallback model")
-        self.fallback_label.grid(row=6, column=0, sticky="w")
-        self.fallback_box = ttk.Combobox(tab, textvariable=self.fallback_model, values=self._model_choices())
-        self.fallback_box.grid(row=6, column=1, sticky="ew", pady=4)
+        self.fallback_label.grid(row=7, column=0, sticky="w")
+        self.fallback_box = ttk.Combobox(tab, textvariable=self.fallback_model, values=self._model_choices(provider=self.fallback_provider.get()))
+        self.fallback_box.grid(row=7, column=1, sticky="ew", pady=4)
         self.best_button = ttk.Button(tab, text="Find best models", command=self._find_best_clicked)
-        self.best_button.grid(row=6, column=2, padx=(8, 0))
+        self.best_button.grid(row=7, column=2, padx=(8, 0))
 
-        ttk.Label(tab, text="Timeout (seconds)").grid(row=7, column=0, sticky="w")
-        ttk.Spinbox(tab, from_=1, to=30, textvariable=self.timeout, width=8).grid(row=7, column=1, sticky="w", pady=4)
-        ttk.Label(tab, text="Without the offline pack, TinyFix waits at least 10 seconds.", foreground="#555555").grid(row=7, column=2, sticky="w", padx=(8, 0))
+        self.fallback_key_label = ttk.Label(tab, text="Fallback API key")
+        self.fallback_key_label.grid(row=8, column=0, sticky="w")
+        self.fallback_key_entry = ttk.Entry(tab, textvariable=self.fallback_key, show="\u2022")
+        self.fallback_key_entry.grid(row=8, column=1, columnspan=2, sticky="ew", pady=4)
+        self.fallback_key.trace_add("write", self._on_fallback_key)
 
-        ttk.Button(tab, text="Test", command=self._test_clicked).grid(row=8, column=0, sticky="w", pady=(12, 0))
-        ttk.Label(tab, textvariable=self.online_status, wraplength=500).grid(row=8, column=1, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(tab, text="Timeout (seconds)").grid(row=9, column=0, sticky="w")
+        ttk.Spinbox(tab, from_=1, to=30, textvariable=self.timeout, width=8).grid(row=9, column=1, sticky="w", pady=4)
+        ttk.Label(tab, text="Without the offline pack, TinyFix waits at least 10 seconds.", foreground="#555555").grid(row=9, column=2, sticky="w", padx=(8, 0))
+
+        ttk.Button(tab, text="Test", command=self._test_clicked).grid(row=10, column=0, sticky="w", pady=(12, 0))
+        ttk.Label(tab, textvariable=self.online_status, wraplength=500).grid(row=10, column=1, columnspan=2, sticky="w", pady=(12, 0))
 
         self.use_check = ttk.Checkbutton(tab, text="Use online model", variable=self.use_online)
-        self.use_check.grid(row=9, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        self.use_check.grid(row=11, column=0, columnspan=3, sticky="w", pady=(12, 0))
         self._sync_use_online_state()
         self._on_provider()
+        self._show_fallback_key()
 
     def _on_provider(self, _event=None) -> None:
         label = self._provider_display.get()
         for key, value in PROVIDER_LABELS.items():
             if value == label:
                 self.provider.set(key)
-        is_openai = self.provider.get() == PROVIDER_OPENAI
+        provider = self.provider.get()
+        previous = self._shown_provider
+        if provider != previous and not getattr(self, "_loading", True):
+            # Remember what was typed for the provider we are leaving, and bring back the new one's.
+            self._keys[previous] = self.api_key.get()
+            self._main_models[previous] = self.model.get()
+            self.api_key.set(self._keys.get(provider, ""))
+            self.model.set(self._main_models.get(provider) or DEFAULT_MODELS.get(provider, ("", ""))[0])
+            if self._fallback_follows_main:
+                self._set_fallback_provider(provider)
+        self._shown_provider = provider
+        is_openai = provider == PROVIDER_OPENAI
         self.base_entry.configure(state="normal" if is_openai else "disabled")
         if is_openai:
             self.base_label.grid()
@@ -585,18 +656,61 @@ class SettingsWindow:
         else:
             self.base_label.grid_remove()
             self.base_entry.grid_remove()
+        self.key_help.pack_forget()
+        self.key_steps.pack_forget()
+        self.or_steps.pack_forget()
         if is_openai:
-            self.key_help.configure(text="Works with OpenAI, OpenRouter, Groq, Ollama, LM Studio, and other /v1 APIs")
-            self.key_steps.pack_forget()
+            self.key_help.configure(text="Works with OpenAI, Groq, Ollama, LM Studio, and other /v1 APIs")
             self.key_help.pack(anchor="w", pady=(4, 0))
+        elif provider == PROVIDER_OPENROUTER:
+            self.or_steps.pack(anchor="w", fill="x", pady=(4, 8))
         else:
-            self.key_help.pack_forget()
             self.key_steps.pack(anchor="w", fill="x", pady=(4, 8))
-            if hasattr(self, "model_box"):
-                self.model_box.configure(values=self._model_choices())
-                if not (self.model.get() or "").strip():
-                    self.model.set(DEFAULT_GOOGLE_MODEL)
+        if hasattr(self, "model_box"):
+            self.model_box.configure(values=self._model_choices())
+            if not (self.model.get() or "").strip():
+                self.model.set(DEFAULT_MODELS.get(provider, ("", ""))[0])
+        if hasattr(self, "fallback_key_entry"):
+            self._show_fallback_key()
         self._invalidate_test()
+
+    def _set_fallback_provider(self, provider: str) -> None:
+        """Switch the fallback provider, remembering the fallback model chosen for the one we leave."""
+        previous = self.fallback_provider.get()
+        if previous != provider:
+            self._fallback_models[previous] = self.fallback_model.get()
+            self.fallback_model.set(self._fallback_models.get(provider) or DEFAULT_MODELS.get(provider, ("", ""))[1])
+        self.fallback_provider.set(provider)
+        self._fallback_provider_display.set(PROVIDER_LABELS.get(provider, ""))
+        self.fallback_box.configure(values=self._model_choices(provider=provider))
+        self.fallback_key.set(self._keys.get(provider, ""))
+
+    def _on_fallback_provider(self, _event=None) -> None:
+        label = self._fallback_provider_display.get()
+        for key, value in PROVIDER_LABELS.items():
+            if value == label:
+                self._set_fallback_provider(key)
+        self._fallback_follows_main = self.fallback_provider.get() == self.provider.get()
+        self._show_fallback_key()
+        self._invalidate_test()
+
+    def _on_fallback_key(self, *_args) -> None:
+        if getattr(self, "_loading", True):
+            return
+        provider = self.fallback_provider.get()
+        if provider != self.provider.get():
+            self._keys[provider] = self.fallback_key.get()
+            self._invalidate_test()
+
+    def _show_fallback_key(self) -> None:
+        """The fallback needs its own key only when it is on a different provider than the main model."""
+        separate = self.fallback_provider.get() != self.provider.get() and self.fallback_provider.get() != PROVIDER_OPENAI
+        if separate:
+            self.fallback_key_label.grid()
+            self.fallback_key_entry.grid()
+        else:
+            self.fallback_key_label.grid_remove()
+            self.fallback_key_entry.grid_remove()
 
     def _toggle_key(self) -> None:
         self.key_entry.configure(show="" if self.show_key.get() else "•")
@@ -630,6 +744,8 @@ class SettingsWindow:
             api_key=self.api_key.get().strip(),
             model=self.model.get().strip(),
             fallback_model=self.fallback_model.get().strip(),
+            fallback_provider="" if self.fallback_provider.get() == self.provider.get() else self.fallback_provider.get(),
+            fallback_api_key="" if self.fallback_provider.get() == self.provider.get() else self._keys.get(self.fallback_provider.get(), "").strip(),
             base_url=self.base_url.get().strip(),
             timeout=timeout,
             enabled=bool(self.use_online.get()),
@@ -646,15 +762,17 @@ class SettingsWindow:
             config.target_language = self.target_language.get().strip() or DEFAULT_TARGET_LANGUAGE
         return config
 
-    def _model_choices(self, names: list[str] | None = None) -> list[str]:
+    def _model_choices(self, names: list[str] | None = None, provider: str | None = None) -> list[str]:
         values: list[str] = []
         for name in names or []:
             item = (name or "").strip()
             if item and item not in values:
                 values.append(item)
-        if self.provider.get() == PROVIDER_GOOGLE and DEFAULT_GOOGLE_MODEL not in values:
-            values.insert(0, DEFAULT_GOOGLE_MODEL)
-        current = (self.model.get() if hasattr(self, "model") else "") or ""
+        provider = provider or self.provider.get()
+        for default in reversed(DEFAULT_MODELS.get(provider, ())):
+            if default and default not in values:
+                values.insert(0, default)
+        current = (self.model.get() if hasattr(self, "model") and provider == self.provider.get() else "") or ""
         current = current.strip()
         if current and current not in values:
             values.append(current)
@@ -675,9 +793,12 @@ class SettingsWindow:
                     self.online_status.set(error)
                     return
                 self.model_box.configure(values=self._model_choices(names))
+                if self.fallback_provider.get() == self.provider.get():
+                    self.fallback_box.configure(values=self._model_choices(names))
                 if not (self.model.get() or "").strip():
-                    if self.provider.get() == PROVIDER_GOOGLE:
-                        self.model.set(DEFAULT_GOOGLE_MODEL)
+                    default_main = DEFAULT_MODELS.get(self.provider.get(), ("", ""))[0]
+                    if default_main:
+                        self.model.set(default_main)
                     elif names:
                         self.model.set(names[0])
                 self.online_status.set(f"Found {len(names)} model(s)." if names else "No models were returned. You can type a model name.")
@@ -686,10 +807,14 @@ class SettingsWindow:
         threading.Thread(target=work, name="tinyfix-list-models", daemon=True).start()
 
     def _find_best_clicked(self) -> None:
-        if self.provider.get() != PROVIDER_GOOGLE:
-            self.online_status.set("Finding the best models only works with Google.")
+        if self.provider.get() not in (PROVIDER_GOOGLE, PROVIDER_OPENROUTER):
+            self.online_status.set("Finding the best models works with Google and OpenRouter.")
             return
-        self.online_status.set("Timing Gemini models. This takes up to 30 seconds...")
+        if not self.api_key.get().strip():
+            self.online_status.set("Paste your API key first.")
+            return
+        provider = self.provider.get()
+        self.online_status.set("Timing models on typo fixes, English and Persian. This takes up to 30 seconds...")
         self.best_button.configure(state="disabled")
 
         def work() -> None:
@@ -698,7 +823,7 @@ class SettingsWindow:
             try:
                 ranked = find_best_models(self._current_llm(include_prompts=False))
             except Exception as exc:
-                error = friendly_key_error(sanitize_error(str(exc), self.api_key.get().strip()))
+                error = friendly_key_error(sanitize_error(str(exc), self.api_key.get().strip()), provider)
 
             def done() -> None:
                 self.best_button.configure(state="normal")
@@ -708,12 +833,15 @@ class SettingsWindow:
                 best = ranked[0][0]
                 backup = ranked[1][0] if len(ranked) > 1 else ""
                 self.model.set(best)
-                self.fallback_model.set(backup)
                 names = [name for name, _ in ranked]
                 self.model_box.configure(values=self._model_choices(names))
-                self.fallback_box.configure(values=self._model_choices(names))
                 summary = ", ".join(f"{n} {s:.1f}s" for n, s in ranked[:3])
-                self.online_status.set(f"Main: {best}. Fallback: {backup or 'none found'}. ({summary}) Press Test, then Save.")
+                if self.fallback_provider.get() == provider:
+                    self.fallback_model.set(backup)
+                    self.fallback_box.configure(values=self._model_choices(names, provider=provider))
+                    self.online_status.set(f"Main: {best}. Fallback: {backup or 'none found'}. ({summary}) Press Test, then Save.")
+                else:
+                    self.online_status.set(f"Main: {best}. The fallback stays on its own provider. ({summary}) Press Test, then Save.")
             self.root.after(0, done)
 
         threading.Thread(target=work, name="tinyfix-best-models", daemon=True).start()
@@ -728,8 +856,8 @@ class SettingsWindow:
                 sample = probe_connection(self._current_llm(include_prompts=False), timeout=8)
             except Exception as exc:
                 error = sanitize_error(str(exc), self.api_key.get().strip())
-                if self.provider.get() == PROVIDER_GOOGLE:
-                    error = friendly_key_error(error)
+                if self.provider.get() in (PROVIDER_GOOGLE, PROVIDER_OPENROUTER):
+                    error = friendly_key_error(error, self.provider.get())
             def done() -> None:
                 if error:
                     self._tested_ok = False
@@ -814,6 +942,7 @@ class SettingsWindow:
             translate_select_all=bool(translate and translate.select_all),
             sensitivity=self.sensitivity.get(),
             llm=llm,
+            provider_keys={**self._keys, llm.provider: llm.api_key},
             last_update_check=self.data.last_update_check,
             skills=skills,
             skill_menu_hotkey=parse_skill_hotkey(self.skills_page.menu_hotkey),
