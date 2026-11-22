@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
+from language_guess import looks_english
 from prompts import (
     DEFAULT_FIX_PROMPT,
     DEFAULT_TARGET_LANGUAGE,
@@ -259,11 +260,19 @@ def probe_connection(config: LLMConfig, timeout: float | None = None) -> str:
 # Without the offline pack the fallback is only the basic dictionary engine, which is much weaker than the online
 # model, so the online model gets more time before TinyFix gives up on it.
 NO_LOCAL_MODEL_TIMEOUT = 10.0
+# Text that is not English has no offline fallback at all (the offline engine only knows English), so the online
+# model gets the longest wait. Measured: normal answers take 1-2 s, but slow moments take 10-18 s.
+NO_FALLBACK_TIMEOUT = 20.0
 
 
-def fix_timeout(config: LLMConfig, engine) -> float:
-    """Seconds to wait for the online Fix: the user's setting, or at least 10 s when no local model backs it up."""
+def fix_timeout(config: LLMConfig, engine, text: str | None = None) -> float:
+    """Seconds to wait for the online Fix.
+
+    The user's setting when a local model can back it up, at least 10 s without the offline pack, and at least
+    20 s for text that is not English (nothing offline can fix it)."""
     base = float(config.timeout or DEFAULT_TIMEOUT)
+    if text is not None and not looks_english(text):
+        return max(base, NO_FALLBACK_TIMEOUT)
     if engine is not None and getattr(engine, "has_model", False):
         return base
     return max(base, NO_LOCAL_MODEL_TIMEOUT)
@@ -281,22 +290,37 @@ def translate_online(config: LLMConfig, text: str) -> str:
 
 
 def correct_with_fallback(text: str, engine, config: LLMConfig | None) -> tuple[str, str]:
-    """Return (corrected_text, source) where source is 'online', 'offline', or 'fallback'."""
+    """Return (corrected_text, source) where source is 'online', 'offline', 'fallback', or 'unsupported'.
+
+    'unsupported' means: the text is not English, no online model is available, and the English-only offline
+    engine must not touch it. For non-English text a failed online request raises instead of falling back, so the
+    caller can say "timed out" rather than a misleading "no typos found"."""
+    english = looks_english(text)
     if config is not None and config.ready:
         try:
-            result = correct_online(config, text, timeout=fix_timeout(config, engine))
+            result = correct_online(config, text, timeout=fix_timeout(config, engine, text))
             if result:
                 return result, "online"
+            if not english:
+                raise LLMError("The model returned empty text")
             logger.info("Online correction returned empty text; falling back to the offline engine")
         except LLMTimeout as exc:
+            if not english:
+                raise
             logger.info("Online correction timed out; falling back to the offline engine: %s", exc)
         except LLMError as exc:
+            if not english:
+                raise
             logger.info("Online correction failed; falling back to the offline engine: %s", exc)
-        except Exception:
+        except Exception as exc:
+            if not english:
+                raise LLMError(f"Online correction failed ({exc.__class__.__name__})") from exc
             logger.info("Online correction failed; falling back to the offline engine", exc_info=True)
         if engine is None:
             return text, "fallback"
         return engine.fix(text), "fallback"
+    if not english:
+        return text, "unsupported"
     if engine is None:
         return text, "offline"
     return engine.fix(text), "offline"

@@ -9,7 +9,7 @@ LANGUAGE_TOKEN = "{{language}}"
 
 DEFAULT_FIX_PROMPT = """You are a precise copy editor. Correct spelling, grammar, and typographical errors in the text below, and nothing else.
 
-Keep the original meaning, tone, voice, formatting, punctuation style, line breaks, spacing, and language. Do not translate, summarize, rewrite for style, or add or remove content.
+The text can be in any language. Correct it in its own language and keep that language. Keep the original meaning, tone, voice, formatting, punctuation style, line breaks, and spacing. Do not translate, summarize, rewrite for style, or add or remove content.
 
 Do not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text.
 
