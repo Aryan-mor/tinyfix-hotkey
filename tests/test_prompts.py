@@ -88,3 +88,9 @@ def test_improve_prompt_covers_the_rules_that_matter():
 def test_improve_prompt_survives_model_wrapping():
     wrapped = "```\nWrite a short email to my manager saying I will be out tomorrow.\n```"
     assert strip_model_output(wrapped) == "Write a short email to my manager saying I will be out tomorrow."
+
+
+def test_improve_prompt_keeps_numbered_lists():
+    text = DEFAULT_IMPROVE_PROMPT.lower()
+    assert "preserve structure" in text
+    assert "1. 2. 3." in DEFAULT_IMPROVE_PROMPT

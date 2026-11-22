@@ -336,3 +336,17 @@ def test_example_specs_are_documented():
     assert names == ["Make formal email", "Summarize", "Translate to German"]
     for _name, prompt in EXAMPLE_SKILL_SPECS:
         assert "{{content}}" in prompt
+
+def test_unedited_old_improve_prompt_is_upgraded_but_custom_is_kept():
+    from prompts import DEFAULT_IMPROVE_PROMPT, LEGACY_IMPROVE_PROMPTS
+    from skills import SKILL_IMPROVE_PROMPT, default_store, ensure_builtins
+
+    store = default_store()
+    skill = next(s for s in store.skills if s.id == SKILL_IMPROVE_PROMPT)
+    skill.prompt = LEGACY_IMPROVE_PROMPTS[0]
+    ensure_builtins(store)
+    assert skill.prompt == DEFAULT_IMPROVE_PROMPT
+
+    skill.prompt = "my own prompt {{content}}"
+    ensure_builtins(store)
+    assert skill.prompt == "my own prompt {{content}}"
