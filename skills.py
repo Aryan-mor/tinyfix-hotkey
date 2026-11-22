@@ -19,6 +19,7 @@ from hotkey_util import (
 )
 from prompts import (
     DEFAULT_FIX_PROMPT,
+    DEFAULT_IMPROVE_PROMPT,
     DEFAULT_REWRITE_LANGUAGE_PROMPT,
     DEFAULT_REWRITE_PROMPT,
     DEFAULT_TRANSLATE_PROMPT,
@@ -33,14 +34,17 @@ SKILL_FIX_ALL = "fix-all"
 SKILL_TRANSLATE = "translate"
 SKILL_REWRITE = "rewrite"
 SKILL_REWRITE_LANGUAGE = "rewrite-language"
+SKILL_IMPROVE_PROMPT = "improve-prompt"
 BUILTIN_IDS = (
     SKILL_FIX,
     SKILL_FIX_ALL,
     SKILL_TRANSLATE,
     SKILL_REWRITE,
     SKILL_REWRITE_LANGUAGE,
+    SKILL_IMPROVE_PROMPT,
 )
 CORE_BUILTIN_IDS = (SKILL_FIX, SKILL_FIX_ALL, SKILL_TRANSLATE)
+OPTIONAL_BUILTIN_IDS = (SKILL_REWRITE, SKILL_REWRITE_LANGUAGE, SKILL_IMPROVE_PROMPT)
 
 INPUT_SELECTION = "selection"
 INPUT_SELECT_ALL = "select_all"
@@ -180,11 +184,14 @@ class SkillStore:
     version: int = SKILLS_VERSION
     skills: list[Skill] = field(default_factory=list)
     skill_menu_hotkey: str = DEFAULT_HOTKEY_MENU
+    # Ids of optional built-in skills the user deleted. They are not added back on the next start.
+    dismissed: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "version": int(self.version or SKILLS_VERSION),
             "skill_menu_hotkey": _hotkey_spec(self.skill_menu_hotkey, DEFAULT_HOTKEY_MENU),
+            "dismissed": [str(item) for item in self.dismissed],
             "skills": [skill.to_dict() for skill in self.skills],
         }
 
@@ -196,6 +203,7 @@ class SkillStore:
             version=int(raw.get("version") or SKILLS_VERSION),
             skills=skills,
             skill_menu_hotkey=_hotkey_spec(raw.get("skill_menu_hotkey"), DEFAULT_HOTKEY_MENU),
+            dismissed=[str(item) for item in (raw.get("dismissed") or []) if isinstance(item, str)],
         )
 
     def get(self, skill_id: str) -> Skill | None:
@@ -272,6 +280,16 @@ def default_skills(
             builtin=True,
             offline_fallback=False,
         ),
+        Skill(
+            id=SKILL_IMPROVE_PROMPT,
+            name="Improve prompt",
+            input_mode=INPUT_SELECTION,
+            prompt=DEFAULT_IMPROVE_PROMPT,
+            hotkey="none",
+            enabled=True,
+            builtin=True,
+            offline_fallback=False,
+        ),
     ]
 
 
@@ -283,7 +301,12 @@ def ensure_builtins(store: SkillStore, **legacy) -> SkillStore:
     have = {skill.id for skill in store.skills}
     defaults = default_skills(**legacy)
     missing_core = [skill for skill in defaults if skill.id in CORE_BUILTIN_IDS and skill.id not in have]
-    missing_rewrite = [skill for skill in defaults if skill.id in (SKILL_REWRITE, SKILL_REWRITE_LANGUAGE) and skill.id not in have]
+    gone = set(store.dismissed)
+    missing_rewrite = [
+        skill
+        for skill in defaults
+        if skill.id in OPTIONAL_BUILTIN_IDS and skill.id not in have and skill.id not in gone
+    ]
     if missing_core:
         store.skills = missing_core + list(store.skills)
     if missing_rewrite:
@@ -292,7 +315,7 @@ def ensure_builtins(store: SkillStore, **legacy) -> SkillStore:
         if skill.id in (SKILL_FIX, SKILL_FIX_ALL):
             skill.builtin = True
             skill.offline_fallback = True
-        elif skill.id in (SKILL_TRANSLATE, SKILL_REWRITE, SKILL_REWRITE_LANGUAGE):
+        elif skill.id in (SKILL_TRANSLATE, SKILL_REWRITE, SKILL_REWRITE_LANGUAGE, SKILL_IMPROVE_PROMPT):
             skill.builtin = True
             skill.offline_fallback = False
     return store
@@ -322,11 +345,18 @@ def duplicate_skill(skill: Skill) -> Skill:
     return copy
 
 
+def can_delete(skill: Skill) -> bool:
+    """Fix, Fix all and Translate can only be turned off: the app's fallback and old settings rely on them."""
+    return skill.id not in CORE_BUILTIN_IDS
+
+
 def delete_skill(store: SkillStore, skill_id: str) -> bool:
     skill = store.get(skill_id)
-    if skill is None or skill.builtin:
+    if skill is None or not can_delete(skill):
         return False
     store.skills = [item for item in store.skills if item.id != skill_id]
+    if skill_id in OPTIONAL_BUILTIN_IDS and skill_id not in store.dismissed:
+        store.dismissed.append(skill_id)
     return True
 
 

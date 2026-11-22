@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from engine.fixer import (
@@ -175,6 +175,7 @@ class Tinyfix:
         self.fixer = fixer
         self.wrong_word = wrong_word
         self.model = model
+        self.has_model = model is not None and wrong_word is not None
         self.sensitivity = DEFAULT_SENSITIVITY
         self._preset = get_sensitivity_preset(DEFAULT_SENSITIVITY)
 
@@ -183,7 +184,8 @@ class Tinyfix:
         preset = get_sensitivity_preset(name)
         self._preset = preset
         self.sensitivity = preset.name
-        self.fixer.weights = preset.weights
+        # Without the offline pack there is no context score, so its weight must be zero.
+        self.fixer.weights = preset.weights if self.has_model else replace(preset.weights, context=0.0)
         if self.wrong_word is not None:
             self.wrong_word.settings = preset.wrong_word
         return self.sensitivity
@@ -291,19 +293,29 @@ class Tinyfix:
         self.fixer.remember_undo(word)
 
 
-def load_tinyfix(model_dir: Path, mode: str = "balanced", sensitivity: str | None = None) -> Tinyfix:
+def load_tinyfix(
+    model_dir: Path,
+    mode: str = "balanced",
+    sensitivity: str | None = None,
+    use_model: bool = True,
+    model_path: Path | None = None,
+) -> Tinyfix:
+    """Build the engine. use_model=False gives the dictionary-only engine (no numpy/onnxruntime needed)."""
     model_dir = Path(model_dir)
     words_text = (model_dir / "words.txt").read_text(encoding="utf-8")
-    vocabulary = _lines((model_dir / "wrong-word-vocab.txt").read_text(encoding="utf-8"))
-    confusions = _lines((model_dir / "wrong-word-confusions.txt").read_text(encoding="utf-8"))
-    model = OnnxModel(str(model_dir / "wrong-word.onnx"))
-    settings = CAREFUL_WRONG_WORD if mode == "careful" else EAGER_WRONG_WORD
-    wrong_word = WrongWordChecker(model, vocabulary, confusions, settings)
     word_list = parse_word_list(words_text)
     trie = WordTrie([entry.word for entry in word_list])
+    wrong_word = None
+    model = None
+    if use_model:
+        vocabulary = _lines((model_dir / "wrong-word-vocab.txt").read_text(encoding="utf-8"))
+        confusions = _lines((model_dir / "wrong-word-confusions.txt").read_text(encoding="utf-8"))
+        model = OnnxModel(str(model_path or (model_dir / "wrong-word.onnx")))
+        settings = CAREFUL_WRONG_WORD if mode == "careful" else EAGER_WRONG_WORD
+        wrong_word = WrongWordChecker(model, vocabulary, confusions, settings)
     weights = FixerWeights(
         frequency=WITH_MODEL_WEIGHTS.frequency,
-        context=WITH_MODEL_WEIGHTS.context,
+        context=WITH_MODEL_WEIGHTS.context if use_model else 0.0,
         keep_cost=WITH_MODEL_WEIGHTS.keep_cost,
         min_confidence=SPELLING_MIN_CONFIDENCE,
     )
@@ -311,9 +323,8 @@ def load_tinyfix(model_dir: Path, mode: str = "balanced", sensitivity: str | Non
     engine = Tinyfix(fixer, wrong_word, model)
     if sensitivity is not None:
         engine.apply_sensitivity(sensitivity)
-    elif mode == "careful":
+    elif mode == "careful" and use_model:
         engine.sensitivity = "cautious"
-        engine._preset = get_sensitivity_preset("cautious")
         # Keep the stricter careful wrong-word settings already applied above.
         engine._preset = SensitivityPreset(
             name="cautious",

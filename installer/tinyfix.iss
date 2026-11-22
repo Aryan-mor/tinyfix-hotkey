@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.4.0"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -59,8 +59,15 @@ Name: "{userstartup}\TinyFix"; Filename: "{app}\{#MyAppExeName}"; Tasks: autosta
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch TinyFix"; Flags: nowait postinstall skipifsilent
 
+[InstallDelete]
+; Older versions shipped onnxruntime, numpy and Pillow inside _internal. Upgrades only overwrite files,
+; so clear the old runtime folder first; the new build restores what it needs. The optional pack, the
+; config and the user data live outside _internal and are not touched.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\cache"
+Type: filesandordirs; Name: "{app}\pack"
 Type: files; Name: "{app}\tinyfix.log"
 Type: files; Name: "{app}\tinyfix.pid"
 Type: files; Name: "{app}\config.ini"

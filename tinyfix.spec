@@ -15,6 +15,8 @@ hiddenimports = [
     "engine.trie",
     "engine.typo_cost",
     "engine.wrong_word",
+    "offline_pack",
+    "tray",
     "tinyfix_lib",
     "hotkey_util",
     "update_check",
@@ -27,13 +29,14 @@ hiddenimports = [
     "sv_ttk",
 ]
 
-for pkg in ("onnxruntime", "pystray", "PIL", "sv_ttk"):
+for pkg in ("sv_ttk",):
     collected_datas, collected_binaries, collected_hidden = collect_all(pkg)
     datas += collected_datas
     binaries += collected_binaries
     hiddenimports += collected_hidden
 
-for name in ("wrong-word.onnx", "wrong-word-vocab.txt", "wrong-word-confusions.txt", "words.txt"):
+# wrong-word.onnx ships in the optional offline pack, not in the exe.
+for name in ("wrong-word-vocab.txt", "wrong-word-confusions.txt", "words.txt"):
     datas.append((str(root / "models" / name), "models"))
 
 rev = root / "model-revision.txt"
@@ -41,6 +44,10 @@ if rev.exists():
     datas.append((str(rev), "."))
 
 icon = root / "assets" / "tinyfix.ico"
+for number in (1, 2, 3):
+    working = root / "assets" / f"tinyfix-working-{number}.ico"
+    if working.exists():
+        datas.append((str(working), "."))
 if icon.exists():
     datas.append((str(icon), "."))
 
@@ -57,7 +64,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # numpy and onnxruntime live in the optional offline pack (see offline_pack.py).
+    excludes=["numpy", "onnxruntime", "PIL", "pystray"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

@@ -9,7 +9,7 @@ def test_manual_update_check_always_has_visible_feedback():
     text = (ROOT / "app.py").read_text(encoding="utf-8")
     assert "Checking…" in text or "Checking..." in text
     assert "def safe_tray_action" in text
-    assert "pystray swallows" in text or "Tray menu action failed" in text
+    assert "Tray menu action failed" in text
     assert "should_auto_check" in text
     # The manual worker must not call should_auto_check.
     start = text.index("def manual_update_check_worker")
@@ -71,7 +71,7 @@ def test_v132_defaults_and_review_followups():
     assert "WM_HOTKEY" in menu
     assert "DEFAULT_GOOGLE_MODEL" in settings
     assert "Default. A little more willing" in settings
-    assert "Built-in skills" in settings
+    assert "SkillsPage" in settings  # one skills list on its own page
     assert "TARGET_LANGUAGE_CHOICES" in settings
 
 
@@ -80,13 +80,14 @@ def test_settings_collect_separates_skill_enabled_from_hotkey():
     start = settings.index("def _collect(self)")
     end = settings.index("def _apply(self)", start)
     body = settings[start:end]
-    assert "fix_skill_enabled" in body
-    assert "rew_skill_enabled" in body
-    assert "rew_hk_enabled" in body
-    assert "_hotkey_spec_from_row" in body
-    assert "def _sync_builtin_rows_from_skill" in settings
-    assert "by_id[SKILL_FIX].enabled = bool(self.sel_enabled.get())" not in body
-    assert "by_id[SKILL_REWRITE].enabled = bool(self.rew_enabled.get())" not in body
+    # One skills list is the single source of truth: legacy fields are derived from the skills, never from
+    # separate per-row variables, and "enabled" is a property of the skill, independent of its shortcut.
+    assert "hotkey_of(SKILL_FIX)" in body
+    assert "hotkey_of(SKILL_FIX_ALL)" in body
+    assert "hotkey_of(SKILL_TRANSLATE)" in body
+    assert "translate.select_all" in body
+    assert "dismissed_skills=" in body
+    assert "self.sel_enabled" not in settings and "self.rew_hk_enabled" not in settings
 
     tinyfix_spec = (ROOT / "tinyfix.spec").read_text(encoding="utf-8")
     assert "third_party/no-slop" in tinyfix_spec

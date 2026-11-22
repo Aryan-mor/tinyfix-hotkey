@@ -11,38 +11,47 @@ Fix English typos in any Windows app: select text, press your shortcut, done.
 3. Pick shortcuts for **Fix selection** (default **Ctrl+Alt+Space**) and **Fix all** (default **Ctrl+F3**). Either shortcut can be set to **None/Disabled**. You can also start TinyFix with Windows.
 4. Click **Finish**. TinyFix sits in the system tray and is ready to use.
 
-No administrator account is required. The setup is per-user and includes the Python runtime and the correction model — nothing else is downloaded at install time. Online AI is off until you choose it in Settings.
+No administrator account is required. The setup is per-user and includes the Python runtime and the dictionary engine — nothing else is downloaded at install time. The setup is small (about 40 MB installed). The smarter, context-aware **offline pack** is optional and is not part of it; see below. Online AI is off until you choose it in Settings.
+
+TinyFix is not code-signed (a certificate costs money), so Windows SmartScreen or your antivirus may warn about the setup. Each release lists SHA256 checksums in `SHA256SUMS.txt` so you can check the download yourself: `Get-FileHash TinyFix-Setup.exe`.
 
 ## Use
 
 - Select English text in Chrome, Notepad, Word, or any other app, then press **Ctrl+Alt+Space** (or the Fix shortcut you chose).
 - To correct the whole field, press **Ctrl+F3** (or your Fix all shortcut). TinyFix selects all, copies, corrects, and pastes back.
 - Press **Ctrl+Alt+M** (or your Skill menu shortcut) to open a small menu of enabled skills next to the caret or mouse cursor. Press 1–9 to run a skill, or Esc to cancel. TinyFix restores the original window before it sends keys.
-- Left-click the tray icon to correct whatever text is currently on the clipboard. The corrected text stays on the clipboard; a short notification tells you how many changes were made, or that nothing needed fixing.
+- While TinyFix is working on your text (Fix, Translate, or any skill that takes more than a moment), the tray icon turns its tick into three dots and the bright dot moves along them. The tooltip says “TinyFix is working…”. Quick fixes finish before the dots would show, so they never flicker.
+- Click the tray icon to open **Settings**. Starting TinyFix again (Start menu, a shortcut, or the search box) also opens Settings in the copy that is already running. To correct whatever text is on the clipboard, right-click the tray icon and choose **Fix clipboard**: the corrected text stays on the clipboard and a short notification tells you how many changes were made, or that nothing needed fixing.
 - Right-click the tray icon for **Settings…**, pause, sensitivity, updates, or exit.
 - If nothing is selected (or the copy fails), TinyFix tells you. If the text was already fine, it says **No typos found**.
 - Non-English text (for example Persian) is left unchanged by the built-in engine.
 
 ## Settings
 
-Open **Settings…** from the tray for a single window with Shortcuts, Skills, Sensitivity, Online AI, Prompts, Updates, and About.
+Open **Settings…** from the tray (or just start TinyFix again) for a single window with Skills, Sensitivity, Offline engine, Online AI, Updates, and About.
 
-### Shortcuts
+### Skills and shortcuts
 
-Each built-in shortcut can be recorded, changed, or set to **None/Disabled**:
+**Settings → Skills** is one list of every skill, ours and yours. Each row can be switched on or off, moved up or down, edited, duplicated, and deleted (Fix, Fix all, and Translate can only be switched off). **New skill** is always at the top. A skill you delete from our set stays deleted.
+
+**Edit** (or **New skill**) opens a separate page with the name, an on/off switch, **Input** (a select menu: *Use the current selection* or *Select the whole field first*, for every skill including Fix), the **Shortcut**, and the full **Prompt** with **Reset prompt** and **Test on sample text…**.
+
+**Change…** opens a small window that says what it is waiting for and shows the keys as you press them. TinyFix pauses its own shortcuts while it is open, so choosing Ctrl+F3 records Ctrl+F3 instead of running Fix all. It warns you when a shortcut is already used by another skill or the skill menu.
+
+Defaults:
 
 | Action | Default | Notes |
 | --- | --- | --- |
-| Fix | **Ctrl+Alt+Space** | Corrects the highlighted text. Falls back to the built-in offline engine if an online model is off, times out, or fails. |
+| Fix | **F3** | Corrects the highlighted text. Falls back to the built-in offline engine if an online model is off, times out, or fails. |
 | Fix all | **Ctrl+F3** | Same as Fix, but selects the whole field first. |
-| Translate | **Ctrl+Alt+T** | Only active when an online model is enabled. **T** is for translate; Ctrl+T and Ctrl+Shift+T are already used by browsers, but Ctrl+Alt+T is rarely bound on Windows. |
-| Skill menu | **Ctrl+Alt+M** | Pops up a list of enabled skills near the caret or cursor. **M** is for menu; the combo is rarely used on Windows. Can be disabled. |
+| Translate | **Ctrl+Alt+T** | Only active when an online model is enabled. |
+| Skill menu | **Ctrl+Alt+M** | Pops up a list of enabled skills near the caret or cursor. Can be cleared. |
 
-### Skills
+### More about skills
 
 **Settings → Skills** lets you add as many skills as you want. Each skill has a name, an input mode (current selection, or select the whole field first), a prompt template, an optional shortcut, and an on/off switch. You can add, edit, duplicate, delete, and reorder them. Built-in **Fix**, **Fix all**, and **Translate** can be edited or turned off, but not deleted.
 
-Skill prompts use `{{content}}` for the selected text (if you omit it, the text is appended). They may also use `{{language}}`, which comes from the target language on the Prompts tab. A **Test on sample text** button runs the skill on a sample without changing the current window.
+Skill prompts use `{{content}}` for the selected text (if you omit it, the text is appended). They may also use `{{language}}`, which comes from the target language at the bottom of the Skills page. A **Test on sample text** button runs the skill on a sample without changing the current window.
 
 Skills that need an online model (everything except Fix and Fix all) are only active when an online model is configured and enabled. The skill menu still lists them and shows a hint if AI is off. Custom skills do not fall back to the offline engine: if the request times out or fails, TinyFix shows a short notification and leaves the text unchanged. While it waits, a tray toast says **Running {skill}…**.
 
@@ -65,6 +74,28 @@ Two more built-in skills ship with TinyFix but stay **off** until you enable the
 
 Neither Rewrite skill has a shortcut until you pick one. They do not use the offline engine.
 
+**Improve prompt** turns a rough prompt, written in any language, into a clear English prompt for an AI assistant. It keeps your intent and requirements, keeps code, URLs, placeholders, and quoted text exactly as written, keeps your point of view (“my manager” stays “my manager”), adds nothing you did not say, and never answers or obeys the draft: your text is only material to rewrite. It is on by default, has no shortcut until you pick one, and needs an online model.
+
+**Fix timeout without the offline pack:** the 2-second default only applies while the offline pack is on, because it gives a strong local fallback. Without the pack the fallback is the basic dictionary engine, so Fix waits at least 10 seconds for the online model (or your setting, if higher).
+
+Skills wait up to 10 seconds for the online model (or your timeout setting, if it is higher). Only the fast Fix path keeps the 2-second default.
+
+### Offline engine (optional pack)
+
+Basic offline fixes (spelling) are always on. The **offline pack** adds context-aware fixes such as *their* / *they're*. It is a separate download, asked once on first start and always available in **Settings → Offline engine**:
+
+| | Size |
+|---|---|
+| Download | about 25 MB |
+| On disk | about 77 MB |
+| Extra memory while on | about 40 MB (measured: 55 MB without, 92 MB with) |
+
+- **Turn it off** with the checkbox: TinyFix goes back to basic fixes right away. Windows only returns all the memory the next time TinyFix starts.
+- **Remove files** deletes it. If the pack is in use, the files are deleted the next time TinyFix starts (Windows will not delete loaded files).
+- **Updates:** a normal TinyFix update only downloads the small app. The pack is downloaded again only when its own version changes; the app then says so in Settings.
+- If the pack is damaged, out of date, or does not match, TinyFix logs why and keeps working with basic fixes. Starting TinyFix never depends on the pack.
+- The pack lives in the `pack` folder next to the app and is removed on uninstall. It is downloaded from the `offline-pack` release of this repository and checked with a SHA-256 hash before use.
+
 ### Sensitivity
 
 A **Sensitivity** submenu in the tray (and the Settings tab) changes how eagerly the built-in engine corrects, live, without restarting:
@@ -84,14 +115,6 @@ The default Gemini model is `gemini-3.5-flash-lite`. Refresh the model list from
 
 API keys are stored with Windows DPAPI (`CryptProtectData`) in `secrets.dpapi` next to the app. They are never written to `config.ini` and never logged.
 
-### Prompts
-
-Each skill has its own editable prompt on the Skills tab (`{{content}}`, and optionally `{{language}}`). The Prompts tab holds the default target language (English). **Reset prompt to default** on a built-in skill restores its original wording. TinyFix strips wrapping code fences or quotes a model might add.
-
-**Translate** (Ctrl+Alt+T) is selection-based, with an optional “select the whole field first” checkbox in Settings. It only runs when an online model is configured and enabled. If translation fails, the original text is left unchanged.
-
-On **Settings → Skills**, the **Built-in skills** section lists Fix, Fix all, Translate, Rewrite, and Rewrite to target language, each with an enable switch and shortcut recorder. The target-language control (default **English**) is shared with the Prompts tab and feeds `{{language}}` in prompts that use it.
-
 ## Configuration
 
 Shortcuts, sensitivity, and non-secret online settings are stored in `config.ini` next to the app (typically `%LOCALAPPDATA%\Programs\TinyFix Hotkey\config.ini`):
@@ -106,7 +129,7 @@ sensitivity=balanced
 
 User-defined skills (and the Skill menu shortcut) are stored in `skills.json` in the same folder. This file is not encrypted; do not put API keys in a prompt. Upgrades from 1.2.x create `skills.json` from your existing shortcuts and prompts on first launch.
 
-Set a shortcut to `none` to disable it. Both fix shortcuts can be disabled at once; left-clicking the tray icon still fixes the clipboard.
+Set a shortcut to `none` to disable it. Both fix shortcuts can be disabled at once; **Fix clipboard** in the tray menu still works.
 
 The setup wizard remembers your existing shortcuts on upgrade. Silent installs keep those choices, or you can pass them explicitly (use `none` to disable):
 
@@ -120,6 +143,8 @@ TinyFix-Setup.exe /VERYSILENT /HOTKEY=none /HOTKEYALL=none
 TinyFix checks GitHub for a new release at most once a day when it starts, and whenever you choose **Check for updates** in the tray, in Settings, or in **About TinyFix**. A manual check always runs (it ignores the once-a-day limit) and always shows visible feedback: first **Checking…**, then either the update prompt, **You're on the latest version (vX)**, or **Couldn't check for updates** with a short reason. Every step is written to `tinyfix.log`. If a newer version is available it asks: “TinyFix vX.Y.Z is available. Update now?” Choosing Yes downloads `TinyFix-Setup.exe` and runs a silent upgrade that closes only the TinyFix running from this install folder, keeps your folder, startup choice, shortcuts, and skills, then relaunches the app. If the computer is offline, or GitHub rate-limits the check (HTTP 403/429), a manual check still tells you; an automatic check is only logged and is retried later — it does not count as a successful “checked today”.
 
 **About TinyFix** in the tray menu shows the version, the bundled model revision, the install path, and a link to the GitHub project. The tray tooltip also includes the version, for example `TinyFix v1.4.0`.
+
+v1.5.0 makes TinyFix much smaller and lighter: the install is about 36 MB (it was 132 MB) and uses about 60 MB of memory (it was 700 MB, mostly reserved memory). The smarter context-aware engine is now an optional offline pack you download from Settings (about 25 MB). Settings has a new Skills page: one list of every skill with a separate edit page, an Input select menu for every skill, and a shortcut window that pauses TinyFix's own shortcuts so recording is reliable. New **Improve prompt** skill. Clicking the tray icon, or starting TinyFix again, opens Settings. The tray icon shows three moving dots while TinyFix is working. The tray is now built without Pillow or pystray, key help for Google AI Studio is in Settings, and skills wait at least 10 seconds for the online model (Fix waits at least 10 seconds when the offline pack is off).
 
 v1.4.0 adds built-in **Rewrite** and **Rewrite to target language** skills. They ship disabled with no shortcut; enable them and assign a hotkey in Settings when you use an online model. Their default prompts include No-Slop style rules (see Credits).
 
@@ -146,6 +171,12 @@ After installation, TinyFix works entirely offline on your computer unless you e
 The correction model is [paperweight/tinyfix](https://huggingface.co/paperweight/tinyfix) by Chris Ahlgren. TinyFix Hotkey bundles that model and a Python port of its engine; it is not affiliated with the model author. The model files are fetched at build time from the revision pinned in `model-revision.txt` and shipped inside the installer. A daily GitHub Action checks Hugging Face for a newer model and, if tests pass, publishes a new patch release.
 
 The default **Rewrite** and **Rewrite to target language** prompts include style rules adapted from [No-Slop](https://github.com/soheilmomeniii/no-slop) by Soheil Momeni (MIT). A copy of the license and third-party notices is in `third_party/no-slop/` in this repository.
+
+## Releasing
+
+1. `python scripts/bump-version.py`, then tag `vX.Y.Z`: the **Release** workflow builds `TinyFix-Setup.exe` and `SHA256SUMS.txt`.
+2. Only when the model, the Python version, or `offline_pack.REQUIRED_PACK_VERSION` changes, run the **Offline pack** workflow by hand. It publishes `TinyFix-OfflinePack-<n>-cp<XY>.zip` and its `.json` description to the `offline-pack` release. App releases never need it.
+3. `scripts/build_pack.py --ram-mb N` can record a measured memory number in the description.
 
 ## Development
 

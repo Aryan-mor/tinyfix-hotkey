@@ -52,6 +52,8 @@ def openai_server():
 
 
 class _StubEngine:
+    has_model = True  # offline pack on: the user's short timeout applies
+
     def fix(self, text: str) -> str:
         return text.replace("frinds", "friends") + " [offline]"
 
@@ -142,3 +144,79 @@ def test_resolve_google_model_keeps_chosen_and_fills_empty():
     assert resolve_google_model(None) == DEFAULT_GOOGLE_MODEL
     assert resolve_google_model("gemini-2.0-flash") == "gemini-2.0-flash"
     assert resolve_google_model("gemini-3.5-flash-lite") == "gemini-3.5-flash-lite"
+
+
+def test_skills_get_a_longer_timeout_than_the_fix_path(monkeypatch):
+    import llm_client
+
+    seen = []
+    monkeypatch.setattr(llm_client, "complete", lambda cfg, prompt, timeout=None: seen.append(timeout) or "ok")
+    cfg = llm_client.LLMConfig(provider="google", api_key="k", enabled=True, timeout=2.0, model="m")
+    assert llm_client.run_skill_online(cfg, "{{content}}", "hi") == "ok"
+    assert seen == [llm_client.SKILL_MIN_TIMEOUT]
+    cfg.timeout = 30.0  # a larger user setting is respected
+    llm_client.run_skill_online(cfg, "{{content}}", "hi")
+    assert seen[-1] == 30.0
+
+
+class _Engine:
+    def __init__(self, has_model):
+        self.has_model = has_model
+
+    def fix(self, text):
+        return "OFFLINE:" + text
+
+
+def _cfg(timeout):
+    import llm_client
+
+    return llm_client.LLMConfig(provider="google", api_key="k", enabled=True, timeout=timeout, model="m")
+
+
+def test_fix_timeout_is_at_least_10s_without_a_local_model():
+    import llm_client
+
+    assert llm_client.fix_timeout(_cfg(2.0), _Engine(False)) == 10.0
+    assert llm_client.fix_timeout(_cfg(2.0), None) == 10.0
+    assert llm_client.fix_timeout(_cfg(30.0), _Engine(False)) == 30.0  # a higher setting is respected
+
+
+def test_fix_timeout_keeps_the_users_setting_with_a_local_model():
+    import llm_client
+
+    assert llm_client.fix_timeout(_cfg(2.0), _Engine(True)) == 2.0
+    assert llm_client.fix_timeout(_cfg(5.0), _Engine(True)) == 5.0
+
+
+def test_correct_with_fallback_passes_the_right_timeout(monkeypatch):
+    import llm_client
+
+    seen = []
+    monkeypatch.setattr(llm_client, "complete", lambda cfg, prompt, timeout=None: seen.append(timeout) or "fixed")
+    assert llm_client.correct_with_fallback("x", _Engine(False), _cfg(2.0)) == ("fixed", "online")
+    assert llm_client.correct_with_fallback("x", _Engine(True), _cfg(2.0)) == ("fixed", "online")
+    assert seen == [10.0, 2.0]
+
+
+def test_a_slow_online_model_still_falls_back_to_the_engine(monkeypatch):
+    import llm_client
+
+    def slow(cfg, prompt, timeout=None):
+        raise llm_client.LLMTimeout("timed out")
+
+    monkeypatch.setattr(llm_client, "complete", slow)
+    assert llm_client.correct_with_fallback("x", _Engine(False), _cfg(2.0)) == ("OFFLINE:x", "fallback")
+
+
+def test_slow_server_is_waited_for_when_there_is_no_local_model(openai_server):
+    """Same slow server as the fallback test, but without the offline pack: 10 s is enough, so no fallback."""
+    base, server = openai_server
+    _Handler.delay = 0.6
+    _Handler.status = 200
+    config = LLMConfig(provider="openai_compatible", api_key="sk-test-key", model="local-model", base_url=base, timeout=0.2, enabled=True)
+
+    class NoLocal(_StubEngine):
+        has_model = False
+
+    _result, source = correct_with_fallback("Hi frinds", NoLocal(), config)
+    assert source == "online"
