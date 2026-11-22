@@ -338,3 +338,12 @@ def test_pack_dir_override_via_environment(tmp_path, monkeypatch):
     assert op.pack_root(tmp_path) == tmp_path / "elsewhere"
     monkeypatch.delenv("TINYFIX_PACK_DIR")
     assert op.pack_root(tmp_path) == tmp_path / "pack"
+
+
+def test_the_pack_release_can_never_become_the_latest_release():
+    """The update check asks GitHub for the latest release; the pack release must be a pre-release or it breaks updates."""
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "offline-pack.yml").read_text(encoding="utf-8")
+    assert "--prerelease --latest=false" in text.split("gh release create", 1)[1].splitlines()[0]
+    assert "gh release edit offline-pack --prerelease --latest=false" in text
