@@ -65,7 +65,7 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.5.3"
+APP_VERSION = "1.5.4"
 MUTEX_NAME = "Local\\TinyFixHotkey" + os.environ.get("TINYFIX_MUTEX_SUFFIX", "")  # the suffix is for tests only
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
@@ -487,9 +487,9 @@ def load_settings() -> None:
         )
         translate_select_all = _parse_bool(parser.get(CONFIG_SECTION, "translate_select_all", fallback="false"))
         try:
-            timeout = float(parser.get(CONFIG_SECTION, "llm_timeout", fallback=str(2)))
+            timeout = float(parser.get(CONFIG_SECTION, "llm_timeout", fallback=str(6)))
         except ValueError:
-            timeout = 2.0
+            timeout = 6.0
         provider = parser.get(CONFIG_SECTION, "llm_provider", fallback="google") or "google"
         raw_model = parser.get(CONFIG_SECTION, "llm_model", fallback="").strip()
         if raw_model:

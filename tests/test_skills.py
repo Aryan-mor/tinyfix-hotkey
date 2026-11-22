@@ -378,3 +378,9 @@ def test_fix_and_translate_defaults_carry_slop_rules_and_end_with_em_dash_rule()
         assert "No-Slop" in prompt and "De-Slopifier" in prompt
         assert "Don't use em dashes." in prompt
         assert "{{content}}" in prompt
+
+
+def test_fix_prompt_requires_capitalization():
+    from prompts import DEFAULT_FIX_PROMPT
+
+    assert "Capitalize the first letter of every sentence" in DEFAULT_FIX_PROMPT

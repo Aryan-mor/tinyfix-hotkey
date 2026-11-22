@@ -21,7 +21,7 @@ from prompts import (
 PROVIDER_GOOGLE = "google"
 PROVIDER_OPENAI = "openai_compatible"
 PROVIDERS = (PROVIDER_GOOGLE, PROVIDER_OPENAI)
-DEFAULT_TIMEOUT = 2.0
+DEFAULT_TIMEOUT = 6.0
 DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 

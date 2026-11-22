@@ -7,7 +7,7 @@ import re
 CONTENT_TOKEN = "{{content}}"
 LANGUAGE_TOKEN = "{{language}}"
 
-DEFAULT_FIX_PROMPT = """You are a precise copy editor. Correct spelling, grammar, and typographical errors in the text below, and nothing else.
+DEFAULT_FIX_PROMPT = """You are a precise copy editor. Correct spelling, grammar, capitalization, and typographical errors in the text below, and nothing else. Capitalize the first letter of every sentence and the pronoun "I" (for example, "did you go?" becomes "Did you go?"), and fix wrong or missing apostrophes.
 
 The text can be in any language. Correct it in its own language and keep that language. Keep the original meaning, tone, voice, formatting, punctuation style, line breaks, and spacing. Do not translate, summarize, rewrite for style, or add or remove content.
 
@@ -36,6 +36,7 @@ Do not add a heading, explanation, or commentary. Do not wrap the result in quot
 """
 
 LEGACY_FIX_PROMPTS = (
+    'You are a precise copy editor. Correct spelling, grammar, and typographical errors in the text below, and nothing else.\n\nThe text can be in any language. Correct it in its own language and keep that language. Keep the original meaning, tone, voice, formatting, punctuation style, line breaks, and spacing. Do not translate, summarize, rewrite for style, or add or remove content.\n\nStyle rules, adapted from the No-Slop skill by Soheil Momeni (MIT License, https://github.com/soheilmomeniii/no-slop) and the AI De-Slopifier by Steven Boylan (https://github.com/StevenBoylan/de-slopifier):\n- Never add AI filler or stock phrases the author did not write, such as "delve", "leverage", "seamless", "it is important to note", "in today\'s rapidly evolving landscape", or "in conclusion".\n- Never invent facts, numbers, names, stance, or personality. Keep every hedge and every rough edge the author chose.\n- Replace any em dash or double-hyphen separator with a comma, colon, period, or parentheses, whichever fits. Keep all other punctuation as written.\n\nDo not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text. Don\'t use em dashes.\n\n{{content}}\n',
     'You are a precise copy editor. Correct spelling, grammar, and typographical errors in the text below, and nothing else.\n\nThe text can be in any language. Correct it in its own language and keep that language. Keep the original meaning, tone, voice, formatting, punctuation style, line breaks, and spacing. Do not translate, summarize, rewrite for style, or add or remove content.\n\nDo not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text.\n\n{{content}}\n',
     'You are a precise copy editor. Correct spelling, grammar, and typographical errors in the text below, and nothing else.\n\nKeep the original meaning, tone, voice, formatting, punctuation style, line breaks, spacing, and language. Do not translate, summarize, rewrite for style, or add or remove content.\n\nDo not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text.\n\n{{content}}\n',
 )
