@@ -28,6 +28,7 @@ from llm_client import (
     LLMError,
     PROVIDER_GOOGLE,
     PROVIDER_OPENAI,
+    find_best_models,
     list_models,
     probe_connection,
     sanitize_error,
@@ -499,6 +500,7 @@ class SettingsWindow:
         if not initial_model and (self.data.llm.provider or PROVIDER_GOOGLE) == PROVIDER_GOOGLE:
             initial_model = DEFAULT_GOOGLE_MODEL
         self.model = tk.StringVar(value=initial_model)
+        self.fallback_model = tk.StringVar(value=self.data.llm.fallback_model or "")
         self.timeout = tk.StringVar(value=str(int(self.data.llm.timeout or DEFAULT_TIMEOUT) if float(self.data.llm.timeout).is_integer() else self.data.llm.timeout))
         self.use_online = tk.BooleanVar(value=bool(self.data.llm.enabled and self.data.llm.api_key))
         self.online_status = tk.StringVar(value="")
@@ -551,15 +553,22 @@ class SettingsWindow:
         ttk.Button(tab, text="Refresh models", command=self._refresh_models).grid(row=5, column=2, padx=(8, 0))
         self.model.trace_add("write", lambda *_: self._invalidate_test())
 
-        ttk.Label(tab, text="Timeout (seconds)").grid(row=6, column=0, sticky="w")
-        ttk.Spinbox(tab, from_=1, to=30, textvariable=self.timeout, width=8).grid(row=6, column=1, sticky="w", pady=4)
-        ttk.Label(tab, text="Without the offline pack, TinyFix waits at least 10 seconds.", foreground="#555555").grid(row=6, column=2, sticky="w", padx=(8, 0))
+        self.fallback_label = ttk.Label(tab, text="Fallback model")
+        self.fallback_label.grid(row=6, column=0, sticky="w")
+        self.fallback_box = ttk.Combobox(tab, textvariable=self.fallback_model, values=self._model_choices())
+        self.fallback_box.grid(row=6, column=1, sticky="ew", pady=4)
+        self.best_button = ttk.Button(tab, text="Find best models", command=self._find_best_clicked)
+        self.best_button.grid(row=6, column=2, padx=(8, 0))
 
-        ttk.Button(tab, text="Test", command=self._test_clicked).grid(row=7, column=0, sticky="w", pady=(12, 0))
-        ttk.Label(tab, textvariable=self.online_status, wraplength=500).grid(row=7, column=1, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(tab, text="Timeout (seconds)").grid(row=7, column=0, sticky="w")
+        ttk.Spinbox(tab, from_=1, to=30, textvariable=self.timeout, width=8).grid(row=7, column=1, sticky="w", pady=4)
+        ttk.Label(tab, text="Without the offline pack, TinyFix waits at least 10 seconds.", foreground="#555555").grid(row=7, column=2, sticky="w", padx=(8, 0))
+
+        ttk.Button(tab, text="Test", command=self._test_clicked).grid(row=8, column=0, sticky="w", pady=(12, 0))
+        ttk.Label(tab, textvariable=self.online_status, wraplength=500).grid(row=8, column=1, columnspan=2, sticky="w", pady=(12, 0))
 
         self.use_check = ttk.Checkbutton(tab, text="Use online model", variable=self.use_online)
-        self.use_check.grid(row=8, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        self.use_check.grid(row=9, column=0, columnspan=3, sticky="w", pady=(12, 0))
         self._sync_use_online_state()
         self._on_provider()
 
@@ -620,6 +629,7 @@ class SettingsWindow:
             provider=self.provider.get() or PROVIDER_GOOGLE,
             api_key=self.api_key.get().strip(),
             model=self.model.get().strip(),
+            fallback_model=self.fallback_model.get().strip(),
             base_url=self.base_url.get().strip(),
             timeout=timeout,
             enabled=bool(self.use_online.get()),
@@ -674,6 +684,39 @@ class SettingsWindow:
             self.root.after(0, done)
 
         threading.Thread(target=work, name="tinyfix-list-models", daemon=True).start()
+
+    def _find_best_clicked(self) -> None:
+        if self.provider.get() != PROVIDER_GOOGLE:
+            self.online_status.set("Finding the best models only works with Google.")
+            return
+        self.online_status.set("Timing Gemini models. This takes up to 30 seconds...")
+        self.best_button.configure(state="disabled")
+
+        def work() -> None:
+            error = ""
+            ranked: list[tuple[str, float]] = []
+            try:
+                ranked = find_best_models(self._current_llm(include_prompts=False))
+            except Exception as exc:
+                error = friendly_key_error(sanitize_error(str(exc), self.api_key.get().strip()))
+
+            def done() -> None:
+                self.best_button.configure(state="normal")
+                if error:
+                    self.online_status.set(error)
+                    return
+                best = ranked[0][0]
+                backup = ranked[1][0] if len(ranked) > 1 else ""
+                self.model.set(best)
+                self.fallback_model.set(backup)
+                names = [name for name, _ in ranked]
+                self.model_box.configure(values=self._model_choices(names))
+                self.fallback_box.configure(values=self._model_choices(names))
+                summary = ", ".join(f"{n} {s:.1f}s" for n, s in ranked[:3])
+                self.online_status.set(f"Main: {best}. Fallback: {backup or 'none found'}. ({summary}) Press Test, then Save.")
+            self.root.after(0, done)
+
+        threading.Thread(target=work, name="tinyfix-best-models", daemon=True).start()
 
     def _test_clicked(self) -> None:
         self.online_status.set("Testing…")

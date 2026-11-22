@@ -21,7 +21,7 @@ from prompts import (
 PROVIDER_GOOGLE = "google"
 PROVIDER_OPENAI = "openai_compatible"
 PROVIDERS = (PROVIDER_GOOGLE, PROVIDER_OPENAI)
-DEFAULT_TIMEOUT = 6.0
+DEFAULT_TIMEOUT = 5.0
 DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_GOOGLE_FALLBACK_MODEL = "gemini-2.5-flash-lite"
 # After the main model fails, use the fallback model first for this many seconds before trying the main one again.
@@ -294,6 +294,77 @@ def complete(config: LLMConfig, prompt: str, timeout: float | None = None) -> st
     if config.provider == PROVIDER_OPENAI:
         return _complete_openai(config, prompt, timeout)
     raise LLMError(f"Unknown provider: {config.provider}")
+
+
+_SKIP_WORDS = ("image", "tts", "audio", "live", "embedding", "imagen", "vision", "robotics", "computer", "native", "exp", "learnlm")
+# (text, check) pairs. A model passes only if every check holds, so a fast but sloppy model is not chosen.
+BENCHMARK_CASES = (
+    ("did you go to the shop yesterday", lambda out: out.startswith("Did")),
+    ("Hi frinds, i hope you ar well.", lambda out: "friends" in out and "are" in out and " I " in f" {out} "),
+)
+MAX_BENCHMARK_MODELS = 6
+
+
+def benchmark_candidates(names: list[str]) -> list[str]:
+    """Fast Google text models worth timing: flash and lite variants, no image/audio/live/embedding ones."""
+    picked: list[str] = []
+    for name in names:
+        lowered = name.lower()
+        if not lowered.startswith("gemini") or "flash" not in lowered:
+            continue
+        if any(word in lowered for word in _SKIP_WORDS):
+            continue
+        picked.append(name)
+    picked.sort(key=lambda n: ("lite" not in n.lower(), n))
+    return picked[:MAX_BENCHMARK_MODELS]
+
+
+def rank_models(results: dict[str, tuple[bool, float]]) -> list[tuple[str, float]]:
+    """results maps model -> (passed every check, median seconds). Returns passing models, fastest first."""
+    good = [(model, seconds) for model, (ok, seconds) in results.items() if ok]
+    return sorted(good, key=lambda item: item[1])
+
+
+def find_best_models(config: LLMConfig, timeout: float = 12.0, progress=None, complete_fn=None) -> list[tuple[str, float]]:
+    """Time each candidate Google model on typo-fix samples. Returns [(model, seconds)] best first.
+
+    The best model is the fastest one that gets every sample right, the second is the fallback."""
+    import dataclasses
+    import statistics
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    if config.provider != PROVIDER_GOOGLE:
+        raise LLMError("Finding the best models only works with Google.")
+    run = complete_fn or _complete_gemini
+    candidates = benchmark_candidates(list_models(config, timeout=timeout))
+    if not candidates:
+        raise LLMError("No suitable Gemini models were found for this key.")
+
+    def bench(model: str) -> tuple[str, bool, float]:
+        trial = dataclasses.replace(config, model=model)
+        times: list[float] = []
+        for text, check in BENCHMARK_CASES:
+            started = time.monotonic()
+            try:
+                out = run(trial, render_prompt(DEFAULT_FIX_PROMPT, text), timeout).strip()
+            except LLMError:
+                return model, False, float("inf")
+            times.append(time.monotonic() - started)
+            if not check(out):
+                return model, False, float("inf")
+        return model, True, statistics.median(times)
+
+    results: dict[str, tuple[bool, float]] = {}
+    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
+        for model, ok, seconds in pool.map(bench, candidates):
+            results[model] = (ok, seconds)
+            if progress:
+                progress(model, ok, seconds)
+    ranked = rank_models(results)
+    if not ranked:
+        raise LLMError("None of the models fixed the samples correctly. Try again in a moment.")
+    return ranked
 
 
 def probe_connection(config: LLMConfig, timeout: float | None = None) -> str:
