@@ -44,6 +44,10 @@ icon = root / "assets" / "tinyfix.ico"
 if icon.exists():
     datas.append((str(icon), "."))
 
+no_slop = root / "third_party" / "no-slop"
+if no_slop.is_dir():
+    datas.append((str(no_slop), "third_party/no-slop"))
+
 a = Analysis(
     ["app.py"],
     pathex=[str(root)],

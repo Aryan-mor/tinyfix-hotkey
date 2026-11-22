@@ -5,18 +5,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from hotkey_util import DEFAULT_HOTKEY, DEFAULT_HOTKEY_ALL, DEFAULT_HOTKEY_MENU, DEFAULT_HOTKEY_TRANSLATE, parse_hotkey
-from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TRANSLATE_PROMPT, render_prompt
+from prompts import (
+    DEFAULT_FIX_PROMPT,
+    DEFAULT_REWRITE_LANGUAGE_PROMPT,
+    DEFAULT_REWRITE_PROMPT,
+    DEFAULT_TRANSLATE_PROMPT,
+    render_prompt,
+)
 from skills import (
     EXAMPLE_SKILL_SPECS,
     INPUT_SELECT_ALL,
     INPUT_SELECTION,
     SKILL_FIX,
     SKILL_FIX_ALL,
+    SKILL_REWRITE,
+    SKILL_REWRITE_LANGUAGE,
     SKILL_TRANSLATE,
     Skill,
+    SkillStore,
     default_skills,
     default_store,
     delete_skill,
@@ -30,26 +37,52 @@ from skills import (
     new_custom_skill,
     render_skill_prompt,
     save_skill_store,
+    visible_menu_skills,
 )
 
 
-def test_default_skills_are_fix_fix_all_and_translate():
+def test_default_skills_include_fix_translate_and_rewrite():
     skills = default_skills()
-    assert [skill.id for skill in skills] == [SKILL_FIX, SKILL_FIX_ALL, SKILL_TRANSLATE]
-    assert [skill.name for skill in skills] == ["Fix", "Fix all", "Translate"]
-    fix, fix_all, translate = skills
+    assert [skill.id for skill in skills] == [
+        SKILL_FIX,
+        SKILL_FIX_ALL,
+        SKILL_TRANSLATE,
+        SKILL_REWRITE,
+        SKILL_REWRITE_LANGUAGE,
+    ]
+    assert [skill.name for skill in skills] == [
+        "Fix",
+        "Fix all",
+        "Translate",
+        "Rewrite",
+        "Rewrite to target language",
+    ]
+    fix, fix_all, translate, rewrite, rewrite_lang = skills
     assert fix.input_mode == INPUT_SELECTION
     assert fix_all.input_mode == INPUT_SELECT_ALL
     assert translate.input_mode == INPUT_SELECTION
-    assert fix.offline_fallback and fix_all.offline_fallback and not translate.offline_fallback
+    assert rewrite.input_mode == INPUT_SELECTION
+    assert rewrite_lang.input_mode == INPUT_SELECTION
+    assert fix.offline_fallback and fix_all.offline_fallback
+    assert not translate.offline_fallback
+    assert not rewrite.offline_fallback
+    assert not rewrite_lang.offline_fallback
     assert fix.needs_ai is False and translate.needs_ai is True
+    assert rewrite.needs_ai and rewrite_lang.needs_ai
     assert fix.hotkey_obj().display == parse_hotkey(DEFAULT_HOTKEY).display
     assert fix_all.hotkey_obj().display == parse_hotkey(DEFAULT_HOTKEY_ALL).display
     assert translate.hotkey_obj().display == parse_hotkey(DEFAULT_HOTKEY_TRANSLATE).display
+    assert rewrite.hotkey_obj().is_disabled and rewrite_lang.hotkey_obj().is_disabled
+    assert not rewrite.enabled and not rewrite_lang.enabled
+    assert rewrite.builtin and rewrite_lang.builtin
     assert DEFAULT_HOTKEY_MENU == "Ctrl+Alt+M"
     assert "{{content}}" in fix.prompt
     assert "{{content}}" in translate.prompt
     assert "{{language}}" in translate.prompt
+    assert rewrite.prompt == DEFAULT_REWRITE_PROMPT
+    assert rewrite_lang.prompt == DEFAULT_REWRITE_LANGUAGE_PROMPT
+    assert "{{content}}" in rewrite.prompt
+    assert "{{content}}" in rewrite_lang.prompt and "{{language}}" in rewrite_lang.prompt
 
 
 def test_legacy_hotkeys_and_prompts_are_migrated(tmp_path: Path):
@@ -67,11 +100,13 @@ def test_legacy_hotkeys_and_prompts_are_migrated(tmp_path: Path):
     fix = store.get(SKILL_FIX)
     fix_all = store.get(SKILL_FIX_ALL)
     translate = store.get(SKILL_TRANSLATE)
+    rewrite = store.get(SKILL_REWRITE)
     assert fix is not None and fix.hotkey_obj().display == "F3"
     assert fix_all is not None and fix_all.hotkey_obj().is_disabled
     assert translate is not None and translate.select_all
     assert fix.prompt == "Fix this: {{content}}"
     assert "To {{language}}" in translate.prompt
+    assert rewrite is not None and not rewrite.enabled
     save_skill_store(path, store)
     raw = json.loads(path.read_text(encoding="utf-8"))
     assert raw["skill_menu_hotkey"] == DEFAULT_HOTKEY_MENU
@@ -170,6 +205,17 @@ def test_enabled_skills_hide_ai_skills_when_offline():
     assert names == ["Fix", "Fix all"]
     names_on = [skill.name for skill in enabled_skills(store, ai_ready=True)]
     assert "Translate" in names_on and "Summarize" in names_on
+    assert "Rewrite" not in names_on
+
+
+def test_rewrite_skill_when_enabled_and_ai_ready():
+    store = default_store()
+    rewrite = store.get(SKILL_REWRITE)
+    assert rewrite is not None
+    rewrite.enabled = True
+    assert rewrite.name not in [s.name for s in enabled_skills(store, ai_ready=False)]
+    assert rewrite.name in [s.name for s in enabled_skills(store, ai_ready=True)]
+    assert rewrite.name in [s.name for s in visible_menu_skills(store)]
 
 
 def test_legacy_from_store_maps_builtins():
@@ -189,6 +235,96 @@ def test_ensure_builtins_restores_missing_fix():
     assert restored.skills[0].id == SKILL_FIX
     assert restored.get("Custom") is None  # id is uuid; just check count
     assert any(skill.name == "Custom" for skill in restored.skills)
+
+
+def test_ensure_builtins_appends_missing_rewrite_skills(tmp_path: Path):
+    path = tmp_path / "skills.json"
+    store = SkillStore(
+        skills=[
+            Skill.from_dict(default_skills()[0].to_dict()),
+            Skill.from_dict(default_skills()[1].to_dict()),
+            Skill.from_dict(default_skills()[2].to_dict()),
+            new_custom_skill("Custom only"),
+        ]
+    )
+    store.get(SKILL_FIX).hotkey = "F9"
+    store.get(SKILL_FIX).enabled = False
+    store.get(SKILL_TRANSLATE).prompt = "Stay: {{content}}"
+    save_skill_store(path, store)
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    loaded["skills"] = [s for s in loaded["skills"] if s.get("id") not in (SKILL_REWRITE, SKILL_REWRITE_LANGUAGE)]
+    path.write_text(json.dumps(loaded, indent=2), encoding="utf-8")
+
+    store2, _ = load_skill_store(path)
+    ids = [s.id for s in store2.skills]
+    assert ids[-2:] == [SKILL_REWRITE, SKILL_REWRITE_LANGUAGE]
+    assert store2.get(SKILL_FIX).hotkey == "F9"
+    assert store2.get(SKILL_FIX).enabled is False
+    assert "Stay:" in store2.get(SKILL_TRANSLATE).prompt
+    assert any(s.name == "Custom only" for s in store2.skills)
+    rewrite = store2.get(SKILL_REWRITE)
+    assert rewrite is not None and not rewrite.enabled and rewrite.hotkey == "none"
+
+
+def test_ensure_builtins_does_not_overwrite_existing_rewrite_customization():
+    store = default_store()
+    rewrite = store.get(SKILL_REWRITE)
+    assert rewrite is not None
+    rewrite.enabled = True
+    rewrite.hotkey = "Ctrl+Alt+R"
+    rewrite.prompt = "User prompt {{content}}"
+    ensure_builtins(store)
+    again = store.get(SKILL_REWRITE)
+    assert again is not None
+    assert again.enabled is True
+    assert again.hotkey == "Ctrl+Alt+R"
+    assert again.prompt == "User prompt {{content}}"
+
+
+def test_rewrite_and_translate_never_use_offline_fallback_even_from_json():
+    for skill_id in (SKILL_TRANSLATE, SKILL_REWRITE, SKILL_REWRITE_LANGUAGE):
+        skill = Skill.from_dict(
+            {
+                "id": skill_id,
+                "name": "X",
+                "offline_fallback": True,
+                "builtin": True,
+            }
+        )
+        assert skill.offline_fallback is False
+        assert skill.needs_ai is True
+
+    store = default_store()
+    store.get(SKILL_REWRITE).offline_fallback = True
+    store.get(SKILL_REWRITE_LANGUAGE).offline_fallback = True
+    store.get(SKILL_TRANSLATE).offline_fallback = True
+    ensure_builtins(store)
+    assert store.get(SKILL_TRANSLATE).offline_fallback is False
+    assert store.get(SKILL_REWRITE).offline_fallback is False
+    assert store.get(SKILL_REWRITE_LANGUAGE).offline_fallback is False
+
+
+def test_enabled_skill_with_no_hotkey_is_valid():
+    skill = Skill.from_dict(
+        {
+            "id": SKILL_REWRITE,
+            "name": "Rewrite",
+            "enabled": True,
+            "hotkey": "none",
+            "builtin": True,
+        }
+    )
+    assert skill.enabled is True
+    assert skill.hotkey_obj().is_disabled
+    assert skill.needs_ai is True
+
+
+def test_default_rewrite_stays_disabled_and_needs_ai():
+    rewrite = default_store().get(SKILL_REWRITE)
+    assert rewrite is not None
+    assert rewrite.enabled is False
+    assert rewrite.needs_ai is True
+    assert rewrite.hotkey_obj().is_disabled
 
 
 def test_example_specs_are_documented():

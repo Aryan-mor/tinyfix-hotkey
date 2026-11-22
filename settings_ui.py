@@ -31,12 +31,14 @@ from llm_client import (
     probe_connection,
     sanitize_error,
 )
-from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
+from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT, default_prompt_for_skill
 from skills import (
     INPUT_SELECT_ALL,
     INPUT_SELECTION,
     SKILL_FIX,
     SKILL_FIX_ALL,
+    SKILL_REWRITE,
+    SKILL_REWRITE_LANGUAGE,
     SKILL_TRANSLATE,
     Skill,
     default_skills,
@@ -45,6 +47,24 @@ from skills import (
     new_custom_skill,
 )
 from tinyfix_lib import DEFAULT_SENSITIVITY, SENSITIVITY_NAMES
+
+TARGET_LANGUAGE_CHOICES = (
+    "English",
+    "Persian",
+    "German",
+    "French",
+    "Spanish",
+    "Arabic",
+    "Italian",
+    "Portuguese",
+    "Dutch",
+    "Turkish",
+    "Japanese",
+    "Chinese",
+    "Korean",
+    "Hindi",
+    "Russian",
+)
 
 AISTUDIO_KEY_URL = "https://aistudio.google.com/apikey"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
@@ -128,6 +148,16 @@ def _format_hotkey(hotkey: Hotkey) -> str:
     return DISABLED_LABEL if hotkey.is_disabled else hotkey.display
 
 
+def _hotkey_spec_from_row(hk_enabled: bool, display: str, default: str = "none") -> str:
+    hk = _hotkey_from_row(hk_enabled, display, default)
+    return "none" if hk.is_disabled else hk.display
+
+
+_BUILTIN_SKILL_IDS = frozenset(
+    {SKILL_FIX, SKILL_FIX_ALL, SKILL_TRANSLATE, SKILL_REWRITE, SKILL_REWRITE_LANGUAGE}
+)
+
+
 class SettingsWindow:
     def __init__(self, data: SettingsData, hooks: SettingsHooks, master: tk.Misc | None = None) -> None:
         self.data = data
@@ -166,6 +196,7 @@ class SettingsWindow:
             self.skills = default_skills()
 
         self._build_shortcuts()
+        self.target_language = tk.StringVar(value=self.data.llm.target_language or DEFAULT_TARGET_LANGUAGE)
         self._build_skills()
         self._build_sensitivity()
         self._build_online()
@@ -563,8 +594,12 @@ class SettingsWindow:
         lang_row = ttk.Frame(tab)
         lang_row.grid(row=1, column=0, sticky="w")
         ttk.Label(lang_row, text="Target language for {{language}}").pack(side="left")
-        self.target_language = tk.StringVar(value=self.data.llm.target_language or DEFAULT_TARGET_LANGUAGE)
-        ttk.Entry(lang_row, textvariable=self.target_language, width=24).pack(side="left", padx=(8, 0))
+        ttk.Combobox(
+            lang_row,
+            textvariable=self.target_language,
+            values=TARGET_LANGUAGE_CHOICES,
+            width=22,
+        ).pack(side="left", padx=(8, 0))
         ttk.Label(
             tab,
             text="This language is substituted wherever a skill prompt contains {{language}}, including Translate.",
@@ -606,19 +641,107 @@ class SettingsWindow:
             row=4, column=0, sticky="w", pady=(16, 0)
         )
 
+    def _skill_by_id(self, skill_id: str) -> Skill | None:
+        for skill in self.skills:
+            if skill.id == skill_id:
+                return skill
+        return None
+
+    def _init_builtin_row_vars(self, skill: Skill | None) -> tuple[tk.BooleanVar, tk.BooleanVar, tk.StringVar]:
+        skill_enabled = tk.BooleanVar(value=bool(skill and skill.enabled))
+        hotkey = skill.hotkey_obj() if skill else disabled_hotkey()
+        hk_enabled = tk.BooleanVar(value=not hotkey.is_disabled)
+        key = tk.StringVar(value=_format_hotkey(hotkey))
+        return skill_enabled, hk_enabled, key
+
+    def _sync_builtin_rows_from_skill(self, skill: Skill) -> None:
+        hotkey = skill.hotkey_obj()
+        hk_on = not hotkey.is_disabled
+        key_text = _format_hotkey(hotkey)
+        rows: dict[str, tuple[tk.BooleanVar, tk.BooleanVar, tk.StringVar]] = {
+            SKILL_FIX: (self.fix_skill_enabled, self.sel_enabled, self.sel_key),
+            SKILL_FIX_ALL: (self.all_skill_enabled, self.all_enabled, self.all_key),
+            SKILL_TRANSLATE: (self.tr_skill_enabled, self.tr_enabled, self.tr_key),
+            SKILL_REWRITE: (self.rew_skill_enabled, self.rew_hk_enabled, self.rew_key),
+            SKILL_REWRITE_LANGUAGE: (self.rewl_skill_enabled, self.rewl_hk_enabled, self.rewl_key),
+        }
+        entry = rows.get(skill.id)
+        if entry is None:
+            return
+        skill_en, hk_en, key_var = entry
+        skill_en.set(bool(skill.enabled))
+        hk_en.set(hk_on)
+        key_var.set(key_text)
+
+    def _builtin_row(
+        self,
+        parent: ttk.Frame,
+        row: int,
+        title: str,
+        skill_enabled: tk.BooleanVar,
+        hk_enabled: tk.BooleanVar,
+        key_var: tk.StringVar,
+    ) -> None:
+        ttk.Label(parent, text=title, width=26).grid(row=row, column=0, sticky="w", pady=3)
+        ttk.Checkbutton(parent, text="Enabled", variable=skill_enabled).grid(row=row, column=1, sticky="w", padx=(4, 8))
+        hot = ttk.Frame(parent)
+        hot.grid(row=row, column=2, sticky="ew")
+        hot.columnconfigure(0, weight=1)
+        ttk.Entry(hot, textvariable=key_var, state="readonly", width=24).grid(row=0, column=0, sticky="ew")
+        ttk.Button(hot, text="Record", command=lambda: self._start_record(key_var, hk_enabled)).grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(hot, text="Disable", command=lambda: self._disable_row(key_var, hk_enabled)).grid(row=0, column=2, padx=(6, 0))
+
     def _build_skills(self) -> None:
         tab = self._tab("Skills")
         tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(1, weight=1)
+        tab.rowconfigure(3, weight=1)
 
         ttk.Label(
             tab,
-            text="Create as many skills as you like. Each one can have its own shortcut, prompt, and input mode. Fix and Translate are built in (Fix can still fall back to the offline engine).",
+            text="Create as many skills as you like. Each one can have its own shortcut, prompt, and input mode. Built-in skills include Fix, Translate, and optional Rewrite skills (Rewrite needs an online model).",
             wraplength=680,
         ).grid(row=0, column=0, sticky="w", pady=(0, 8))
 
+        fix = self._skill_by_id(SKILL_FIX)
+        fix_all = self._skill_by_id(SKILL_FIX_ALL)
+        translate = self._skill_by_id(SKILL_TRANSLATE)
+        rewrite = self._skill_by_id(SKILL_REWRITE)
+        rewrite_lang = self._skill_by_id(SKILL_REWRITE_LANGUAGE)
+        self.fix_skill_enabled = tk.BooleanVar(value=bool(fix and fix.enabled))
+        self.all_skill_enabled = tk.BooleanVar(value=bool(fix_all and fix_all.enabled))
+        self.tr_skill_enabled = tk.BooleanVar(value=bool(translate and translate.enabled))
+        self.rew_skill_enabled, self.rew_hk_enabled, self.rew_key = self._init_builtin_row_vars(rewrite)
+        self.rewl_skill_enabled, self.rewl_hk_enabled, self.rewl_key = self._init_builtin_row_vars(rewrite_lang)
+
+        builtins = ttk.LabelFrame(tab, text="Built-in skills", padding=10)
+        builtins.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        builtins.columnconfigure(2, weight=1)
+        self._builtin_row(builtins, 0, "Fix", self.fix_skill_enabled, self.sel_enabled, self.sel_key)
+        self._builtin_row(builtins, 1, "Fix all", self.all_skill_enabled, self.all_enabled, self.all_key)
+        self._builtin_row(builtins, 2, "Translate", self.tr_skill_enabled, self.tr_enabled, self.tr_key)
+        self._builtin_row(builtins, 3, "Rewrite", self.rew_skill_enabled, self.rew_hk_enabled, self.rew_key)
+        self._builtin_row(builtins, 4, "Rewrite to target language", self.rewl_skill_enabled, self.rewl_hk_enabled, self.rewl_key)
+
+        lang_box = ttk.Frame(tab)
+        lang_box.grid(row=2, column=0, sticky="w", pady=(0, 8))
+        lang_row = ttk.Frame(lang_box)
+        lang_row.pack(anchor="w")
+        ttk.Label(lang_row, text="Target language for {{language}}").pack(side="left")
+        ttk.Combobox(
+            lang_row,
+            textvariable=self.target_language,
+            values=TARGET_LANGUAGE_CHOICES,
+            width=22,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Label(
+            lang_box,
+            text="Used by Translate and Rewrite to target language. You can type a language that is not in the list.",
+            foreground="#555555",
+            wraplength=680,
+        ).pack(anchor="w", pady=(4, 0))
+
         body = ttk.Frame(tab)
-        body.grid(row=1, column=0, sticky="nsew")
+        body.grid(row=3, column=0, sticky="nsew")
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
 
@@ -791,13 +914,7 @@ class SettingsWindow:
         if index < 0 or index >= len(self.skills):
             return
         skill = self.skills[index]
-        if skill.id == SKILL_TRANSLATE:
-            value = DEFAULT_TRANSLATE_PROMPT
-        elif skill.id in (SKILL_FIX, SKILL_FIX_ALL):
-            value = DEFAULT_FIX_PROMPT
-        else:
-            from skills import DEFAULT_CUSTOM_PROMPT
-            value = DEFAULT_CUSTOM_PROMPT
+        value = default_prompt_for_skill(skill.id)
         self.skill_prompt.delete("1.0", "end")
         self.skill_prompt.insert("1.0", value.rstrip() + "\n")
 
@@ -857,21 +974,30 @@ class SettingsWindow:
 
     def _collect(self) -> SettingsData:
         self._flush_skill_editor()
+        index = getattr(self, "_selected_skill_index", 0)
+        if self.skills and 0 <= index < len(self.skills):
+            selected = self.skills[index]
+            if selected.id in _BUILTIN_SKILL_IDS:
+                self._sync_builtin_rows_from_skill(selected)
+
         llm = self._current_llm(include_prompts=True)
         skills = [Skill.from_dict(skill.to_dict()) for skill in self.skills]
         by_id = {skill.id: skill for skill in skills}
-        if SKILL_FIX in by_id:
-            by_id[SKILL_FIX].hotkey = (
-                "none" if not self.sel_enabled.get() else (self.sel_key.get() or DEFAULT_HOTKEY)
-            )
-        if SKILL_FIX_ALL in by_id:
-            by_id[SKILL_FIX_ALL].hotkey = (
-                "none" if not self.all_enabled.get() else (self.all_key.get() or DEFAULT_HOTKEY_ALL)
-            )
+
+        def _apply_builtin(skill_id: str, skill_enabled: tk.BooleanVar, hk_enabled: tk.BooleanVar, key_var: tk.StringVar, *, default: str) -> None:
+            skill = by_id.get(skill_id)
+            if skill is None:
+                return
+            skill.enabled = bool(skill_enabled.get())
+            skill.hotkey = _hotkey_spec_from_row(bool(hk_enabled.get()), key_var.get(), default)
+
+        _apply_builtin(SKILL_FIX, self.fix_skill_enabled, self.sel_enabled, self.sel_key, default=DEFAULT_HOTKEY)
+        _apply_builtin(SKILL_FIX_ALL, self.all_skill_enabled, self.all_enabled, self.all_key, default=DEFAULT_HOTKEY_ALL)
+        _apply_builtin(SKILL_TRANSLATE, self.tr_skill_enabled, self.tr_enabled, self.tr_key, default=DEFAULT_HOTKEY_TRANSLATE)
+        _apply_builtin(SKILL_REWRITE, self.rew_skill_enabled, self.rew_hk_enabled, self.rew_key, default="none")
+        _apply_builtin(SKILL_REWRITE_LANGUAGE, self.rewl_skill_enabled, self.rewl_hk_enabled, self.rewl_key, default="none")
+
         if SKILL_TRANSLATE in by_id:
-            by_id[SKILL_TRANSLATE].hotkey = (
-                "none" if not self.tr_enabled.get() else (self.tr_key.get() or DEFAULT_HOTKEY_TRANSLATE)
-            )
             by_id[SKILL_TRANSLATE].input_mode = (
                 INPUT_SELECT_ALL if self.translate_select_all.get() else INPUT_SELECTION
             )

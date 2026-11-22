@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.3.2"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"

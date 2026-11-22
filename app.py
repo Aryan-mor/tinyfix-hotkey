@@ -56,7 +56,7 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.4.0"
 MUTEX_NAME = "Local\\TinyFixHotkey"
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1

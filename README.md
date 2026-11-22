@@ -56,6 +56,15 @@ Examples you can add yourself:
 | **Summarize** | Replaces the selection with a short summary. Prompt idea: `Summarize the text below in a few short sentences. Return only the summary.` plus `{{content}}`. |
 | **Translate to German** | Translates the selection into German (or duplicate the built-in Translate skill and set `{{language}}` / the wording to German). |
 
+Two more built-in skills ship with TinyFix but stay **off** until you enable them on **Settings → Skills** and assign a shortcut (like Translate, they need an online model):
+
+| Skill | What it does |
+| --- | --- |
+| **Rewrite** | Polishes the selection: grammar, clarity, and natural wording, with embedded [No-Slop](https://github.com/soheilmomeniii/no-slop) style rules to avoid common AI phrasing. The prompt is editable; **Reset prompt to default** restores the bundled wording. |
+| **Rewrite to target language** | Same polish and style rules, but the result is written in your chosen target language (`{{language}}` comes from the target-language picker, default **English**). |
+
+Neither Rewrite skill has a shortcut until you pick one. They do not use the offline engine.
+
 ### Sensitivity
 
 A **Sensitivity** submenu in the tray (and the Settings tab) changes how eagerly the built-in engine corrects, live, without restarting:
@@ -80,6 +89,8 @@ API keys are stored with Windows DPAPI (`CryptProtectData`) in `secrets.dpapi` n
 Each skill has its own editable prompt on the Skills tab (`{{content}}`, and optionally `{{language}}`). The Prompts tab holds the default target language (English). **Reset prompt to default** on a built-in skill restores its original wording. TinyFix strips wrapping code fences or quotes a model might add.
 
 **Translate** (Ctrl+Alt+T) is selection-based, with an optional “select the whole field first” checkbox in Settings. It only runs when an online model is configured and enabled. If translation fails, the original text is left unchanged.
+
+On **Settings → Skills**, the **Built-in skills** section lists Fix, Fix all, Translate, Rewrite, and Rewrite to target language, each with an enable switch and shortcut recorder. The target-language control (default **English**) is shared with the Prompts tab and feeds `{{language}}` in prompts that use it.
 
 ## Configuration
 
@@ -108,7 +119,9 @@ TinyFix-Setup.exe /VERYSILENT /HOTKEY=none /HOTKEYALL=none
 
 TinyFix checks GitHub for a new release at most once a day when it starts, and whenever you choose **Check for updates** in the tray, in Settings, or in **About TinyFix**. A manual check always runs (it ignores the once-a-day limit) and always shows visible feedback: first **Checking…**, then either the update prompt, **You're on the latest version (vX)**, or **Couldn't check for updates** with a short reason. Every step is written to `tinyfix.log`. If a newer version is available it asks: “TinyFix vX.Y.Z is available. Update now?” Choosing Yes downloads `TinyFix-Setup.exe` and runs a silent upgrade that closes only the TinyFix running from this install folder, keeps your folder, startup choice, shortcuts, and skills, then relaunches the app. If the computer is offline, or GitHub rate-limits the check (HTTP 403/429), a manual check still tells you; an automatic check is only logged and is retried later — it does not count as a successful “checked today”.
 
-**About TinyFix** in the tray menu shows the version, the bundled model revision, the install path, and a link to the GitHub project. The tray tooltip also includes the version, for example `TinyFix v1.3.2`.
+**About TinyFix** in the tray menu shows the version, the bundled model revision, the install path, and a link to the GitHub project. The tray tooltip also includes the version, for example `TinyFix v1.4.0`.
+
+v1.4.0 adds built-in **Rewrite** and **Rewrite to target language** skills. They ship disabled with no shortcut; enable them and assign a hotkey in Settings when you use an online model. Their default prompts include No-Slop style rules (see Credits).
 
 v1.3.2 changes the default sensitivity to Balanced and the default Gemini model to `gemini-3.5-flash-lite` (existing config values are kept). It also stops TinyFix from leaving other windows always-on-top or holding focus after Fix, the Skill menu, or Settings (foreign windows are never made topmost; thread-input attaches are always detached; the hidden UI window is not raised), speeds up Settings OK by moving ACL work off the UI thread, and tightens Settings/update UI threading and silent upgrades when the app cannot be closed.
 
@@ -131,6 +144,8 @@ After installation, TinyFix works entirely offline on your computer unless you e
 ## Credits
 
 The correction model is [paperweight/tinyfix](https://huggingface.co/paperweight/tinyfix) by Chris Ahlgren. TinyFix Hotkey bundles that model and a Python port of its engine; it is not affiliated with the model author. The model files are fetched at build time from the revision pinned in `model-revision.txt` and shipped inside the installer. A daily GitHub Action checks Hugging Face for a newer model and, if tests pass, publishes a new patch release.
+
+The default **Rewrite** and **Rewrite to target language** prompts include style rules adapted from [No-Slop](https://github.com/soheilmomeniii/no-slop) by Soheil Momeni (MIT). A copy of the license and third-party notices is in `third_party/no-slop/` in this repository.
 
 ## Development
 

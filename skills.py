@@ -17,7 +17,13 @@ from hotkey_util import (
     is_disabled_spec,
     parse_hotkey,
 )
-from prompts import DEFAULT_FIX_PROMPT, DEFAULT_TRANSLATE_PROMPT, render_prompt
+from prompts import (
+    DEFAULT_FIX_PROMPT,
+    DEFAULT_REWRITE_LANGUAGE_PROMPT,
+    DEFAULT_REWRITE_PROMPT,
+    DEFAULT_TRANSLATE_PROMPT,
+    render_prompt,
+)
 
 SKILLS_VERSION = 1
 SKILLS_FILENAME = "skills.json"
@@ -25,7 +31,16 @@ SKILLS_FILENAME = "skills.json"
 SKILL_FIX = "fix"
 SKILL_FIX_ALL = "fix-all"
 SKILL_TRANSLATE = "translate"
-BUILTIN_IDS = (SKILL_FIX, SKILL_FIX_ALL, SKILL_TRANSLATE)
+SKILL_REWRITE = "rewrite"
+SKILL_REWRITE_LANGUAGE = "rewrite-language"
+BUILTIN_IDS = (
+    SKILL_FIX,
+    SKILL_FIX_ALL,
+    SKILL_TRANSLATE,
+    SKILL_REWRITE,
+    SKILL_REWRITE_LANGUAGE,
+)
+CORE_BUILTIN_IDS = (SKILL_FIX, SKILL_FIX_ALL, SKILL_TRANSLATE)
 
 INPUT_SELECTION = "selection"
 INPUT_SELECT_ALL = "select_all"
@@ -106,10 +121,7 @@ class Skill:
         self.hotkey = _hotkey_spec(self.hotkey, "none")
         self.enabled = bool(self.enabled)
         self.builtin = bool(self.builtin)
-        if self.id in (SKILL_FIX, SKILL_FIX_ALL):
-            self.offline_fallback = True
-        else:
-            self.offline_fallback = bool(self.offline_fallback) and self.id in BUILTIN_IDS
+        self.offline_fallback = self.id in (SKILL_FIX, SKILL_FIX_ALL)
 
     @property
     def needs_ai(self) -> bool:
@@ -240,6 +252,26 @@ def default_skills(
             builtin=True,
             offline_fallback=False,
         ),
+        Skill(
+            id=SKILL_REWRITE,
+            name="Rewrite",
+            input_mode=INPUT_SELECTION,
+            prompt=DEFAULT_REWRITE_PROMPT,
+            hotkey="none",
+            enabled=False,
+            builtin=True,
+            offline_fallback=False,
+        ),
+        Skill(
+            id=SKILL_REWRITE_LANGUAGE,
+            name="Rewrite to target language",
+            input_mode=INPUT_SELECTION,
+            prompt=DEFAULT_REWRITE_LANGUAGE_PROMPT,
+            hotkey="none",
+            enabled=False,
+            builtin=True,
+            offline_fallback=False,
+        ),
     ]
 
 
@@ -249,14 +281,18 @@ def default_store(**legacy) -> SkillStore:
 
 def ensure_builtins(store: SkillStore, **legacy) -> SkillStore:
     have = {skill.id for skill in store.skills}
-    missing = [skill for skill in default_skills(**legacy) if skill.id not in have]
-    if missing:
-        store.skills = missing + list(store.skills)
+    defaults = default_skills(**legacy)
+    missing_core = [skill for skill in defaults if skill.id in CORE_BUILTIN_IDS and skill.id not in have]
+    missing_rewrite = [skill for skill in defaults if skill.id in (SKILL_REWRITE, SKILL_REWRITE_LANGUAGE) and skill.id not in have]
+    if missing_core:
+        store.skills = missing_core + list(store.skills)
+    if missing_rewrite:
+        store.skills = list(store.skills) + missing_rewrite
     for skill in store.skills:
         if skill.id in (SKILL_FIX, SKILL_FIX_ALL):
             skill.builtin = True
             skill.offline_fallback = True
-        elif skill.id == SKILL_TRANSLATE:
+        elif skill.id in (SKILL_TRANSLATE, SKILL_REWRITE, SKILL_REWRITE_LANGUAGE):
             skill.builtin = True
             skill.offline_fallback = False
     return store
