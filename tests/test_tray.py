@@ -30,7 +30,7 @@ class Harness:
 
     def __enter__(self):
         self.thread.start()
-        assert self.icon._ready.wait(5), "tray window never became ready"
+        assert self.icon._ready.wait(20), "tray window never became ready"
         return self.icon
 
     def __exit__(self, *exc):

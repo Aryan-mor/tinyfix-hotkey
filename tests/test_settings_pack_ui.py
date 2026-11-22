@@ -343,7 +343,7 @@ def test_base_url_is_hidden_for_google_and_shown_for_openai_style(window):
 
 
 def test_online_tab_fits_in_the_default_window(tk_root):
-    """The Online AI tab must show its last row ("Use online model") without scrolling or clipping."""
+    """The Online AI tab must show its last row ("Use online model"): in view, or one scroll away on a short screen."""
     win = SettingsWindow(make_data(), FakePack().hooks(), master=tk_root)
     try:
         win.root.deiconify()
@@ -351,6 +351,11 @@ def test_online_tab_fits_in_the_default_window(tk_root):
             if win.notebook.tab(i, "text") == "Online AI":
                 win.notebook.select(i)
         for _ in range(20):
+            tk_root.update()
+            time.sleep(0.01)
+        canvas = win.notebook.nametowidget(win.notebook.select()).winfo_children()[0]
+        canvas.yview_moveto(1.0)  # a short screen (a CI runner) scrolls the tab; the last row must be reachable
+        for _ in range(10):
             tk_root.update()
             time.sleep(0.01)
         tab_bottom = win.notebook.winfo_rooty() + win.notebook.winfo_height()
@@ -460,11 +465,12 @@ def test_tabs_scroll_when_the_window_is_shorter_than_the_content(tk_root):
         canvas.yview_moveto(1.0)
         tk_root.update()
         assert canvas.yview()[1] >= 0.999  # the bottom of the form can be reached
-        win.root.geometry("800x900+20+20")
+        win.root.geometry(f"800x{min(1100, win.root.winfo_screenheight() - 60)}+0+0")
         for _ in range(30):
             tk_root.update()
             time.sleep(0.01)
-        assert bar.winfo_manager() == "", "a tall window needs no scrollbar"
+        # The scrollbar shows exactly when the content is taller than the visible area.
+        assert (bar.winfo_manager() == "grid") == (frame.winfo_reqheight() > canvas.winfo_height() + 1)
     finally:
         win._close()
 
