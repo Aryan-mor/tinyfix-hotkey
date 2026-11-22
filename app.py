@@ -23,6 +23,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import offline_pack
+from language_guess import looks_english
 import tray
 from hotkey_util import (
     DEFAULT_HOTKEY,
@@ -64,7 +65,7 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 MUTEX_NAME = "Local\\TinyFixHotkey" + os.environ.get("TINYFIX_MUTEX_SUFFIX", "")  # the suffix is for tests only
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
@@ -298,6 +299,7 @@ def _show_working(working: bool) -> None:
 
 
 busy = WorkLock()
+NOT_ENGLISH_MESSAGE = "This text is not English. Turn on an online model in Settings to fix other languages."
 stop_event = threading.Event()
 paused = threading.Event()
 hotkey_ready = threading.Event()
@@ -864,6 +866,11 @@ def run_skill(skill: Skill, target_hwnd: int | None = None) -> None:
             restore_clipboard(saved)
             logging.info("Skill early return: empty result (length=%s, %s)", len(selected), source)
             notify("TinyFix", f"{skill.name} failed; the text was left unchanged")
+            return
+        if origin == "unsupported":
+            restore_clipboard(saved)
+            logging.info("Skill early return: text is not English and no online model is on (%s)", source)
+            notify("TinyFix", NOT_ENGLISH_MESSAGE)
             return
         if result == selected:
             restore_clipboard(saved)
@@ -1895,7 +1902,9 @@ def on_fix_clipboard(_item=None, _icon=None) -> None:
                 logging.exception("Clipboard fix failed")
                 notify("TinyFix", "Could not correct the clipboard")
                 return
-            if corrected == text:
+            if source == "unsupported":
+                message, corrected = NOT_ENGLISH_MESSAGE, None
+            elif corrected == text:
                 message, corrected = "No typos found in clipboard", None
             else:
                 # Keep the notification consistent with the offline path; count via the engine when possible.
@@ -1910,6 +1919,8 @@ def on_fix_clipboard(_item=None, _icon=None) -> None:
                     label = "change" if count == 1 else "changes"
                     message, corrected = f"Clipboard fixed: {count} {label}", corrected
                 logging.info("Clipboard correction source: %s", source)
+        elif text and not looks_english(text):
+            message, corrected = NOT_ENGLISH_MESSAGE, None
         else:
             message, corrected = plan_clipboard_fix(engine, text)
         if corrected is not None:
