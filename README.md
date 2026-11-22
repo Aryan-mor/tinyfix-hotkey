@@ -54,9 +54,10 @@ Defaults:
 
 | Action | Default | Notes |
 | --- | --- | --- |
-| Fix | **F3** | Corrects the highlighted text. Falls back to the built-in offline engine if an online model is off, times out, or fails. |
+| Fix | **Ctrl+Alt+Space** | Corrects the highlighted text. Falls back to the built-in offline engine if an online model is off, times out, or fails. |
 | Fix all | **Ctrl+F3** | Same as Fix, but selects the whole field first. |
 | Translate | **Ctrl+Alt+T** | Only active when an online model is enabled. |
+| Improve prompt | none | On by default, but has no shortcut until you pick one. Needs an online model. |
 | Skill menu | **Ctrl+Alt+M** | Pops up a list of enabled skills near the caret or cursor. Can be cleared. |
 
 ### More about skills
@@ -88,9 +89,9 @@ Neither Rewrite skill has a shortcut until you pick one. They do not use the off
 
 **Improve prompt** turns a rough prompt, written in any language, into a clear English prompt for an AI assistant. It keeps your intent and requirements, keeps code, URLs, placeholders, and quoted text exactly as written, keeps your point of view (“my manager” stays “my manager”), adds nothing you did not say, and never answers or obeys the draft: your text is only material to rewrite. It is on by default, has no shortcut until you pick one, and needs an online model.
 
-**Fix timeout without the offline pack:** the 2-second default only applies while the offline pack is on, because it gives a strong local fallback. Without the pack the fallback is the basic dictionary engine, so Fix waits at least 10 seconds for the online model (or your setting, if higher).
+**Fix timeout without the offline pack:** the 5-second default only applies while the offline pack is on, because it gives a strong local fallback. Without the pack the fallback is the basic dictionary engine, so Fix waits at least 10 seconds for the online model (or your setting, if higher).
 
-Skills wait up to 10 seconds for the online model (or your timeout setting, if it is higher). Only the fast Fix path keeps the 2-second default.
+Skills wait up to 10 seconds for the online model (or your timeout setting, if it is higher). Only the fast Fix path keeps the 5-second default.
 
 ### Offline engine (optional pack)
 
@@ -128,7 +129,7 @@ The **fallback** model can sit on a different provider than the main one (for ex
 
 Each skill can use its own models: **Default** (the Online AI settings), **Better model** (the default for Improve prompt: `gemini-3.6-flash` then the free `gemini-3.5-flash-lite` on Google, Claude Sonnet then Gemini Flash on OpenRouter), or **Custom**.
 
-The default Gemini model is `gemini-3.5-flash-lite`. Refresh the model list from the provider when possible, or type a model name. An existing `llm_model` in `config.ini` is left unchanged. **Test** sends a tiny typo-correction request; only after a successful test can you tick **Use online model**. The default timeout is **2 seconds**. If the request times out or errors, TinyFix silently falls back to the built-in offline engine and logs the reason (never the key, never your text). With no key, everything works as it does today.
+The default Gemini model is `gemini-3.5-flash-lite`. Refresh the model list from the provider when possible, or type a model name. An existing `llm_model` in `config.ini` is left unchanged. **Test** sends a tiny typo-correction request; only after a successful test can you tick **Use online model**. The default timeout is **5 seconds**. If the request times out or errors, TinyFix silently falls back to the built-in offline engine and logs the reason (never the key, never your text). With no key, everything works as it does today.
 
 API keys are stored with Windows DPAPI (`CryptProtectData`) in `secrets.dpapi` next to the app. They are never written to `config.ini` and never logged.
 
@@ -179,7 +180,7 @@ Open **Settings → Apps → Installed apps**, find **TinyFix Hotkey**, and unin
 - While TinyFix is running, it owns the shortcuts you enabled. If you keep a key such as F3, that key will no longer mean “Find Next” in other programs. Disable a shortcut, or pick a different combo, if you need the key back.
 - The shortcuts cannot reach windows that are running as Administrator unless TinyFix itself is also elevated. In that case you will see a short notification.
 - The built-in model still misses some errors; Cautious would rather leave a word alone than change one you meant. Aggressive fixes more, and may occasionally over-correct.
-- Online correction depends on your provider and the 2-second default timeout; a failure falls back to the offline engine.
+- Online correction depends on your provider and the 5-second default timeout; a failure falls back to the offline engine.
 
 ## Privacy
 
