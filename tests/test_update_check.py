@@ -166,3 +166,26 @@ def test_manual_feedback_does_not_depend_on_once_a_day(tmp_path: Path):
     assert kind == "latest"
     assert "v1.3.2" in message
     assert "rate limited" in short_update_error("HTTP Error 403: rate limit exceeded")
+
+
+def test_rate_limited_api_falls_back_to_the_releases_page_redirect():
+    import urllib.error
+
+    class Page:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def geturl(self):
+            return "https://github.com/Aryan-mor/tinyfix-hotkey/releases/tag/v9.9.9"
+
+    def opener(request, timeout=15):
+        if "api.github.com" in request.full_url:
+            raise urllib.error.HTTPError(request.full_url, 403, "rate limit exceeded", {}, None)
+        return Page()
+
+    latest = fetch_latest_release(opener=opener)
+    assert latest.version == "9.9.9"
+    assert latest.setup_url.endswith("/releases/download/v9.9.9/TinyFix-Setup.exe")

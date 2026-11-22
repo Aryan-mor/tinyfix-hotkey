@@ -16,6 +16,8 @@ from datetime import date
 from pathlib import Path
 
 GITHUB_LATEST = "https://api.github.com/repos/Aryan-mor/tinyfix-hotkey/releases/latest"
+GITHUB_LATEST_PAGE = "https://github.com/Aryan-mor/tinyfix-hotkey/releases/latest"
+GITHUB_DOWNLOAD = "https://github.com/Aryan-mor/tinyfix-hotkey/releases/download"
 SETUP_ASSET = "TinyFix-Setup.exe"
 CONFIG_SECTION = "TinyFix"
 LAST_CHECK_KEY = "last_update_check"
@@ -83,7 +85,14 @@ def fetch_latest_release(
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code in (403, 429):
-            raise ConnectionError(f"GitHub rate limited ({exc.code}); will retry later") from exc
+            # The anonymous API allows only 60 requests an hour per IP address, which a shared network can use
+            # up. The public releases page has no such limit, so read the latest tag from its redirect instead.
+            limited = ConnectionError(f"GitHub rate limited ({exc.code}); will retry later")
+            try:
+                return _latest_from_releases_page(open_url, timeout)
+            except Exception:
+                logging.info("Releases page fallback failed", exc_info=True)
+            raise limited from exc
         raise ConnectionError(f"Could not reach GitHub: {exc}") from exc
     except urllib.error.URLError as exc:
         raise ConnectionError(f"Could not reach GitHub: {exc}") from exc
@@ -99,6 +108,19 @@ def fetch_latest_release(
     if not setup_url:
         raise RuntimeError(f"{SETUP_ASSET} was not found on the latest release")
     return LatestRelease(tag=tag, version=version, setup_url=setup_url, name=str(payload.get("name") or tag))
+
+
+def _latest_from_releases_page(open_url, timeout: float) -> LatestRelease:
+    """Find the latest release without the API: /releases/latest redirects to /releases/tag/<tag>."""
+    request = urllib.request.Request(GITHUB_LATEST_PAGE, headers={"User-Agent": USER_AGENT})
+    with open_url(request, timeout=timeout) as response:
+        final_url = str(response.geturl())
+    match = re.search(r"/releases/tag/([^/?#]+)", final_url)
+    if not match:
+        raise RuntimeError("The releases page did not redirect to a tag")
+    tag = match.group(1)
+    version = str(parse_version(tag))
+    return LatestRelease(tag=tag, version=version, setup_url=f"{GITHUB_DOWNLOAD}/{tag}/{SETUP_ASSET}", name=tag)
 
 
 def should_auto_check(config_path: Path, today: str | None = None) -> bool:
