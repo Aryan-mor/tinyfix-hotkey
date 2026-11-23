@@ -1,0 +1,36 @@
+<!-- General page: language, theme and start with the system. The skill-menu shortcut lives on the Donut page. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TinyFix.App.ViewModels"
+             x:Class="TinyFix.App.Views.Pages.GeneralPage"
+             x:DataType="vm:GeneralPageViewModel">
+  <ScrollViewer>
+    <StackPanel Spacing="16" MaxWidth="640" HorizontalAlignment="Left">
+      <TextBlock Text="{Binding Title}" Classes="h1" />
+      <Border Classes="card">
+        <StackPanel Spacing="14">
+          <StackPanel>
+            <TextBlock Text="{DynamicResource settings.language}" Classes="label" />
+            <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedLanguage}" MinWidth="260">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:LanguageOption">
+                  <TextBlock Text="{Binding Name}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+          <StackPanel>
+            <TextBlock Text="{DynamicResource settings.theme}" Classes="label" />
+            <ComboBox SelectedIndex="{Binding ThemeIndex}" MinWidth="260">
+              <ComboBoxItem Content="{DynamicResource settings.theme_system}" />
+              <ComboBoxItem Content="{DynamicResource settings.theme_light}" />
+              <ComboBoxItem Content="{DynamicResource settings.theme_dark}" />
+            </ComboBox>
+          </StackPanel>
+          <ToggleSwitch IsChecked="{Binding Autostart}" Content="{DynamicResource settings.autostart}" />
+        </StackPanel>
+      </Border>
+      <TextBlock Text="{Binding PlatformNotice}" Classes="warning" IsVisible="{Binding PlatformNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

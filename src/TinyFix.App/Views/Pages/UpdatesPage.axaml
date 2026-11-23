@@ -1,0 +1,23 @@
+<!-- Updates page: check GitHub for a newer release and open its page. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TinyFix.App.ViewModels"
+             x:Class="TinyFix.App.Views.Pages.UpdatesPage"
+             x:DataType="vm:UpdatesPageViewModel">
+  <StackPanel Spacing="16" MaxWidth="640" HorizontalAlignment="Left">
+    <StackPanel Spacing="4">
+      <TextBlock Text="{Binding Title}" Classes="h1" />
+      <TextBlock Text="{DynamicResource updates.desc}" Classes="caption" />
+    </StackPanel>
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <ToggleSwitch IsChecked="{Binding Auto}" Content="{DynamicResource updates.auto}" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Content="{DynamicResource updates.check_now}" Command="{Binding CheckNowCommand}" Classes="accent" />
+          <Button Content="{DynamicResource updates.open}" Command="{Binding OpenPageCommand}" IsVisible="{Binding HasUpdate}" />
+        </StackPanel>
+        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,62 @@
+<!--
+  Settings: navigation on the left (titles, or an icon rail), the selected page on the right.
+  The pane, its icons and the way it collapses follow the MIT settings window credited in THIRD-PARTY-NOTICES.md.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:TinyFix.App.ViewModels"
+        xmlns:pages="using:TinyFix.App.Views.Pages"
+        x:Class="TinyFix.App.Views.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Title="{Binding Title}"
+        Icon="avares://TinyFix/Assets/Icons/tinyfix.ico"
+        Width="1080" Height="760" MinWidth="820" MinHeight="560"
+        WindowStartupLocation="CenterScreen">
+  <Grid ColumnDefinitions="Auto,*">
+    <Border Classes="navpane" Width="{Binding NavWidth}" ClipToBounds="True"
+            Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="0,0,1,0">
+      <DockPanel Margin="{Binding NavPadding}">
+        <StackPanel DockPanel.Dock="Top" Classes="navheader" Orientation="Horizontal" Spacing="10">
+          <Image Source="avares://TinyFix/Assets/Icons/tinyfix.ico" Width="30" Height="30" />
+          <StackPanel VerticalAlignment="Center" IsVisible="{Binding !IsNavCollapsed}">
+            <TextBlock Text="{DynamicResource app.name}" FontSize="18" FontWeight="Bold" />
+            <TextBlock Classes="caption" Text="{DynamicResource app.tagline}" />
+          </StackPanel>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="4,12,4,0">
+          <TextBlock Classes="caption" Margin="8,0,0,0" Text="{Binding VersionText}" IsVisible="{Binding !IsNavCollapsed}" />
+        </StackPanel>
+        <Button DockPanel.Dock="Bottom" Classes="icon navtoggle" Margin="0,8,0,0" Command="{Binding ToggleNavCommand}"
+                ToolTip.Tip="{Binding NavToggleTip}" ToolTip.Placement="Right" AutomationProperties.Name="{Binding NavToggleTip}">
+          <PathIcon Width="17" Height="17" Data="{StaticResource Icon.Sidebar}" />
+        </Button>
+        <ListBox Classes="nav" ItemsSource="{Binding Pages}" SelectedItem="{Binding Selected}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:PageViewModel">
+              <Border Background="Transparent" Padding="12,9" ToolTip.Tip="{Binding Tip}" ToolTip.Placement="Right"
+                      AutomationProperties.Name="{Binding Title}">
+                <StackPanel Classes="navitem" Orientation="Horizontal" Spacing="12">
+                  <PathIcon Classes="navicon" Width="17" Height="17" Data="{Binding Icon}" />
+                  <TextBlock Text="{Binding Title}" VerticalAlignment="Center" IsVisible="{Binding ShowTitle}" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <ScrollViewer Grid.Column="1">
+      <ContentControl Classes="page" Content="{Binding Selected}" Margin="32,26,32,32" MaxWidth="980" HorizontalAlignment="Stretch">
+        <ContentControl.DataTemplates>
+          <DataTemplate DataType="vm:GeneralPageViewModel"><pages:GeneralPage /></DataTemplate>
+          <DataTemplate DataType="vm:DonutPageViewModel"><pages:DonutPage /></DataTemplate>
+          <DataTemplate DataType="vm:SkillsPageViewModel"><pages:SkillsPage /></DataTemplate>
+          <DataTemplate DataType="vm:OnlinePageViewModel"><pages:OnlinePage /></DataTemplate>
+          <DataTemplate DataType="vm:UpdatesPageViewModel"><pages:UpdatesPage /></DataTemplate>
+          <DataTemplate DataType="vm:AboutPageViewModel"><pages:AboutPage /></DataTemplate>
+        </ContentControl.DataTemplates>
+      </ContentControl>
+    </ScrollViewer>
+  </Grid>
+</Window>

@@ -1,0 +1,22 @@
+<!--
+  A small notice in the corner of the screen. It never takes the focus (ShowActivated=False), so the app the user
+  is typing in keeps it, and it hides itself after a few seconds.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 x:Class="TinyFix.App.Views.ToastWindow"
+                 Title="TinyFix"
+                 WindowDecorations="None"
+                 Background="Transparent"
+                 TransparencyLevelHint="Transparent"
+                 Topmost="True"
+                 ShowInTaskbar="False"
+                 ShowActivated="False"
+                 Focusable="False"
+                 CanResize="False"
+                 SizeToContent="WidthAndHeight"
+                 MaxWidth="420">
+  <Border x:Name="Card" Classes="card" Margin="12" Padding="14,10" MaxWidth="380">
+    <TextBlock x:Name="Message" TextWrapping="Wrap" />
+  </Border>
+</Window>

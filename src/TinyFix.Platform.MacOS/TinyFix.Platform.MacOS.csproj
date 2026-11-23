@@ -1,0 +1,16 @@
+<!--
+  TinyFix.Platform.MacOS: macOS implementations of the ports defined in TinyFix.Core: pbcopy/pbpaste, osascript,
+  CoreGraphics, the `security` keychain tool and a LaunchAgent. NOT run on a real Mac by the author: see
+  docs/DOTNET-ARCHITECTURE.md for what is tested. Needs the Accessibility permission for global shortcuts.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>TinyFix.Platform.MacOS</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TinyFix.Core\TinyFix.Core.csproj" />
+    <InternalsVisibleTo Include="TinyFix.Platform.Tests" />
+  </ItemGroup>
+</Project>

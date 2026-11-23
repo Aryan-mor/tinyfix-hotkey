@@ -1,0 +1,93 @@
+<!--
+  Skills page: the list on the left (with add, duplicate, delete, reorder) and the editor of the selected skill on
+  the right: name, enabled, input mode, shortcut, model and prompt.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TinyFix.App.ViewModels"
+             xmlns:c="using:TinyFix.App.Controls"
+             x:Class="TinyFix.App.Views.Pages.SkillsPage"
+             x:DataType="vm:SkillsPageViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,14">
+      <TextBlock Text="{Binding Title}" Classes="h1" />
+      <TextBlock Text="{DynamicResource skills.desc}" Classes="caption" />
+      <TextBlock Text="{Binding Conflicts}" Classes="warning" IsVisible="{Binding Conflicts, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+    </StackPanel>
+    <Grid ColumnDefinitions="300,18,*">
+      <DockPanel Grid.Column="0">
+        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+          <Button Content="{DynamicResource skills.add}" Command="{Binding AddCommand}" Classes="accent" Margin="0,0,6,6" />
+          <Button Content="{DynamicResource skills.duplicate}" Command="{Binding DuplicateCommand}" IsEnabled="{Binding HasSelection}" Margin="0,0,6,6" />
+          <Button Content="{DynamicResource skills.delete}" Command="{Binding DeleteCommand}" IsEnabled="{Binding CanDelete}" Margin="0,0,6,6" />
+          <Button Content="{DynamicResource skills.move_up}" Command="{Binding MoveUpCommand}" IsEnabled="{Binding HasSelection}" Margin="0,0,6,6" />
+          <Button Content="{DynamicResource skills.move_down}" Command="{Binding MoveDownCommand}" IsEnabled="{Binding HasSelection}" Margin="0,0,6,6" />
+        </WrapPanel>
+        <ListBox Classes="soft" ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:SkillRowViewModel">
+              <StackPanel Opacity="{Binding Dim}">
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Subtitle}" Classes="caption" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+      <ScrollViewer Grid.Column="2" IsVisible="{Binding HasSelection}">
+        <Border Classes="card">
+          <StackPanel Spacing="14">
+            <StackPanel>
+              <TextBlock Text="{DynamicResource skills.name}" Classes="label" />
+              <TextBox Text="{Binding Name}" />
+            </StackPanel>
+            <ToggleSwitch IsChecked="{Binding Enabled}" Content="{DynamicResource skills.enabled}" />
+            <StackPanel>
+              <TextBlock Text="{DynamicResource skills.input_mode}" Classes="label" />
+              <ComboBox SelectedIndex="{Binding InputIndex}" MinWidth="280">
+                <ComboBoxItem Content="{DynamicResource skills.mode_selection}" />
+                <ComboBoxItem Content="{DynamicResource skills.mode_all}" />
+              </ComboBox>
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="{DynamicResource skills.shortcut}" Classes="label" />
+              <c:ShortcutRecorder Value="{Binding Shortcut}" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="{DynamicResource skills.model}" Classes="label" />
+              <ComboBox SelectedIndex="{Binding ModelModeIndex}" MinWidth="280">
+                <ComboBoxItem Content="{DynamicResource skills.model_default}" />
+                <ComboBoxItem Content="{DynamicResource skills.model_better}" />
+                <ComboBoxItem Content="{DynamicResource skills.model_custom}" />
+              </ComboBox>
+            </StackPanel>
+            <StackPanel Spacing="10" IsVisible="{Binding IsCustomModel}">
+              <StackPanel>
+                <TextBlock Text="{DynamicResource skills.model_provider}" Classes="label" />
+                <ComboBox SelectedIndex="{Binding ProviderIndex}" MinWidth="280">
+                  <ComboBoxItem Content="{DynamicResource online.provider_google}" />
+                  <ComboBoxItem Content="{DynamicResource online.provider_openrouter}" />
+                  <ComboBoxItem Content="{DynamicResource online.provider_openai}" />
+                </ComboBox>
+              </StackPanel>
+              <StackPanel>
+                <TextBlock Text="{DynamicResource skills.model_name}" Classes="label" />
+                <TextBox Text="{Binding ModelName}" />
+              </StackPanel>
+              <StackPanel>
+                <TextBlock Text="{DynamicResource skills.model_fallback}" Classes="label" />
+                <TextBox Text="{Binding FallbackModel}" />
+              </StackPanel>
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="{DynamicResource skills.prompt}" Classes="label" />
+              <TextBox Text="{Binding Prompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="170" MaxHeight="320" FontFamily="Consolas, Menlo, monospace" />
+              <TextBlock Text="{DynamicResource skills.prompt_hint}" Classes="caption" Margin="0,4,0,0" />
+              <Button Content="{DynamicResource skills.reset_prompt}" Command="{Binding ResetPromptCommand}" Margin="0,8,0,0" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </ScrollViewer>
+    </Grid>
+  </DockPanel>
+</UserControl>

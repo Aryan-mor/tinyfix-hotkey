@@ -1,0 +1,27 @@
+<!--
+  Tests of the OS adapters. Pure logic (autostart files, locale parsing, Wayland detection, command-line helpers) runs
+  everywhere; tests that need the real OS skip themselves on the others.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TinyFix.Platform.Windows\TinyFix.Platform.Windows.csproj" />
+    <ProjectReference Include="..\..\src\TinyFix.Platform.Linux\TinyFix.Platform.Linux.csproj" />
+    <ProjectReference Include="..\..\src\TinyFix.Platform.MacOS\TinyFix.Platform.MacOS.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

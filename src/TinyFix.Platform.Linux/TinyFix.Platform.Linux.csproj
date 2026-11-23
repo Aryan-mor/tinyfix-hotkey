@@ -1,0 +1,15 @@
+<!--
+  TinyFix.Platform.Linux: Linux implementations of the ports defined in TinyFix.Core, built on command-line helpers
+  (xclip / wl-clipboard, xdotool, secret-tool) and XDG autostart. NOT run on a real Linux desktop by the author:
+  see docs/DOTNET-ARCHITECTURE.md for what is tested.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>TinyFix.Platform.Linux</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TinyFix.Core\TinyFix.Core.csproj" />
+    <InternalsVisibleTo Include="TinyFix.Platform.Tests" />
+  </ItemGroup>
+</Project>

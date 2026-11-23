@@ -1,0 +1,55 @@
+<!--
+  TinyFix.App: the Avalonia desktop application (tray icon, skill donut, settings window).
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>TinyFix</AssemblyName>
+    <RootNamespace>TinyFix.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Icons\tinyfix.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TinyFix.Core\TinyFix.Core.csproj" />
+    <ProjectReference Include="..\TinyFix.Platform.Windows\TinyFix.Platform.Windows.csproj" />
+    <ProjectReference Include="..\TinyFix.Platform.Linux\TinyFix.Platform.Linux.csproj" />
+    <ProjectReference Include="..\TinyFix.Platform.MacOS\TinyFix.Platform.MacOS.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="SharpHook" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+    <!-- Shown on the About page. -->
+    <AvaloniaResource Include="..\..\THIRD-PARTY-NOTICES.md" Link="Assets\THIRD-PARTY-NOTICES.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TinyFix.App.Tests" />
+  </ItemGroup>
+
+  <!-- Native debug symbols from NuGet packages (SkiaSharp, HarfBuzz: ~100 MB) are useless to users. -->
+  <Target Name="TinyFixRemoveNativeSymbols" AfterTargets="Publish" Condition="'$(Configuration)' == 'Release'">
+    <ItemGroup>
+      <_TinyFixNativePdb Include="$(PublishDir)lib*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(_TinyFixNativePdb)" />
+  </Target>
+
+  <!-- Repository URL for the About page, taken from Directory.Build.props. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>RepositoryUrl</_Parameter1>
+      <_Parameter2>$(TinyFixRepositoryUrl)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>

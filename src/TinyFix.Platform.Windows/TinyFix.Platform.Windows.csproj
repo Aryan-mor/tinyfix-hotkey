@@ -1,0 +1,16 @@
+<!--
+  TinyFix.Platform.Windows: Windows implementations of the ports defined in TinyFix.Core (clipboard, foreground
+  window, caret, DPAPI secret store, autostart). Targets plain net10.0 so the cross-platform app can reference it;
+  every entry point is guarded with [SupportedOSPlatform("windows")] and only used when OperatingSystem.IsWindows().
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>TinyFix.Platform.Windows</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TinyFix.Core\TinyFix.Core.csproj" />
+    <InternalsVisibleTo Include="TinyFix.Platform.Tests" />
+  </ItemGroup>
+</Project>

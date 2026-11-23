@@ -1,0 +1,61 @@
+<!-- Donut page: the skill-menu shortcut, size, opacity, where it opens, and a live preview. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TinyFix.App.ViewModels"
+             xmlns:c="using:TinyFix.App.Controls"
+             x:Class="TinyFix.App.Views.Pages.DonutPage"
+             x:DataType="vm:DonutPageViewModel">
+  <ScrollViewer>
+    <StackPanel Spacing="16" MaxWidth="640" HorizontalAlignment="Left">
+      <StackPanel Spacing="4">
+        <TextBlock Text="{Binding Title}" Classes="h1" />
+        <TextBlock Text="{DynamicResource donut.page_hint}" Classes="caption" TextWrapping="Wrap" />
+      </StackPanel>
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Text="{DynamicResource settings.menu_shortcut}" Classes="label" />
+          <c:ShortcutRecorder Value="{Binding MenuShortcut}" />
+          <TextBlock Text="{Binding Conflicts}" Classes="warning" Margin="0,8,0,0" IsVisible="{Binding Conflicts, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+      </Border>
+      <Border Classes="card">
+        <StackPanel Spacing="8" Grid.IsSharedSizeScope="True">
+          <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" SharedSizeGroup="LookName" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" SharedSizeGroup="LookValue" />
+            </Grid.ColumnDefinitions>
+            <TextBlock VerticalAlignment="Center" MinWidth="110" MaxWidth="170" TextWrapping="Wrap" Text="{DynamicResource donut.size}" />
+            <Slider x:Name="SizeSlider" Grid.Column="1" Minimum="110" Maximum="220" Value="{Binding OuterRadius}" AutomationProperties.Name="{DynamicResource donut.size}" />
+            <TextBlock Grid.Column="2" Classes="caption" MinWidth="52" VerticalAlignment="Center" TextAlignment="Right" Text="{Binding OuterRadiusText}" />
+          </Grid>
+          <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" SharedSizeGroup="LookName" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" SharedSizeGroup="LookValue" />
+            </Grid.ColumnDefinitions>
+            <TextBlock VerticalAlignment="Center" MinWidth="110" MaxWidth="170" TextWrapping="Wrap" Text="{DynamicResource donut.opacity}" />
+            <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="40" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
+                    Value="{Binding OpacityPercent}" AutomationProperties.Name="{DynamicResource donut.opacity}" />
+            <TextBlock Grid.Column="2" Classes="caption" MinWidth="52" VerticalAlignment="Center" TextAlignment="Right" Text="{Binding OpacityText}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <StackPanel>
+            <TextBlock Text="{DynamicResource donut.open_at}" Classes="label" />
+            <StackPanel Orientation="Horizontal" Spacing="16">
+              <RadioButton GroupName="OpenAt" Content="{DynamicResource donut.open_caret}" IsChecked="{Binding OpenAtCaret}" />
+              <RadioButton GroupName="OpenAt" Content="{DynamicResource donut.open_cursor}" IsChecked="{Binding OpenAtCursor}" />
+            </StackPanel>
+          </StackPanel>
+          <ToggleSwitch IsChecked="{Binding ShowShortcutHints}" Content="{DynamicResource donut.shortcut_hints}" />
+        </StackPanel>
+      </Border>
+      <Button Content="{DynamicResource donut.preview}" Command="{Binding PreviewCommand}" Classes="accent" HorizontalAlignment="Left" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

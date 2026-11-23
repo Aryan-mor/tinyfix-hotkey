@@ -1,0 +1,81 @@
+# Format check, build and tests of the C# rewrite on Windows, Linux and macOS. It does not touch the Python app's own
+# workflows (ci.yml, release.yml). A warning fails the build, like `dotnet build -c Release` must be warning free.
+name: dotnet
+
+on:
+  push:
+    branches: [main, "rewrite/**"]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "docs/DOTNET-*"
+      - "*.props"
+      - "*.slnx"
+      - "global.json"
+      - ".editorconfig"
+      - "scripts/publish.ps1"
+      - ".github/workflows/dotnet.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "docs/DOTNET-*"
+      - "*.props"
+      - "*.slnx"
+      - "global.json"
+      - ".editorconfig"
+      - "scripts/publish.ps1"
+      - ".github/workflows/dotnet.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: dotnet format
+        run: dotnet format TinyFix.slnx --verify-no-changes
+
+  build-test:
+    name: build and test (${{ matrix.os }})
+    needs: format
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build TinyFix.slnx -c Release -p:TreatWarningsAsErrors=true
+
+      # The platform tests skip what needs another OS; the app tests render headless (no display needed).
+      - name: Test
+        run: dotnet test TinyFix.slnx -c Release --no-build
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.os }}
+          path: tests/TinyFix.App.Tests/bin/Release/net10.0/screenshots
+          if-no-files-found: ignore

@@ -1,0 +1,45 @@
+<!--
+  Borderless, transparent, always-on-top window that hosts the skill donut at the caret or the pointer.
+  It is created once and reused (shown and hidden) so the next opening is instant.
+  ShowActivated=False: the window does not take focus just by being shown; the controller activates it
+  once it is on screen, so number keys, Tab and Esc reach it.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="using:TinyFix.App.Controls"
+        xmlns:vm="using:TinyFix.App.ViewModels"
+        x:Class="TinyFix.App.Views.RadialWindow"
+        x:DataType="vm:DonutViewModel"
+        Title="TinyFix"
+        WindowDecorations="None"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        CanResize="False"
+        SizeToContent="WidthAndHeight">
+  <!-- Nearly transparent rather than transparent: a fully clear pixel can let clicks fall through to the app behind. -->
+  <Panel x:Name="Root" Background="{Binding HitBackground}">
+    <c:DonutMenu x:Name="Donut"
+                 Opacity="{Binding DonutOpacity}"
+                 Items="{Binding Items}"
+                 CenterTitle="{Binding CenterTitle}"
+                 CenterSubtitle="{Binding CenterSubtitle}"
+                 CenterNotice="{Binding CenterNotice}"
+                 OuterRadius="{Binding OuterRadius}"
+                 HoleRatio="{Binding HoleRatio}"
+                 SliceOpacity="{Binding SliceOpacity}"
+                 ShowCaptions="{Binding ShowCaptions}"
+                 LabelScale="{Binding LabelScale}"
+                 DefaultShow="{Binding DefaultShow}"
+                 GroupRingSize="{Binding GroupRingSize}"
+                 GroupRingSpread="{Binding GroupRingSpread}"
+                 ReserveSubRing="{Binding ReserveSubRing}"
+                 CanFlip="{Binding CanFlip}"
+                 CenterHint="{Binding FlipHint}"
+                 CenterHintWheel="{Binding FlipHintWheel}"
+                 FlipKey="{Binding FlipKey}"
+                 FlipWithWheel="{Binding FlipWithWheel}" />
+  </Panel>
+</Window>

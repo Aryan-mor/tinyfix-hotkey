@@ -1,0 +1,23 @@
+<!--
+  Application resources and styles. There is no main window: TinyFix lives in the tray and opens windows on demand.
+-->
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TinyFix.App.App"
+             Name="TinyFix"
+             RequestedThemeVariant="Default">
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://TinyFix/Styles/Icons.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://TinyFix/Styles/Soft.axaml" />
+    <StyleInclude Source="avares://TinyFix/Styles/Controls.axaml" />
+  </Application.Styles>
+</Application>
