@@ -27,7 +27,13 @@ public static class AutostartDefault
         return true;
     }
 
-    private static bool IsUsable(string? executablePath) =>
-        !string.IsNullOrWhiteSpace(executablePath)
-        && !Path.GetFileNameWithoutExtension(executablePath).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
+    // Path.GetFileName splits only on this OS's separator, so "C:\...\dotnet.exe" stays one name on Linux and macOS
+    // and would be registered. Both separators are directory separators here.
+    private static bool IsUsable(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+            return false;
+        var normalized = executablePath.Replace('\\', '/');
+        return !Path.GetFileNameWithoutExtension(normalized).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
+    }
 }

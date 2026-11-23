@@ -29,14 +29,18 @@ public class SliceLabelLayoutTests
         new(Center, Inner, Outer, DonutGeometry.MidAngle(index, count), DonutGeometry.Span(count), Gap,
             group ? ChevronIn : 0, group ? ChevronReach : 0);
 
-    // The app's own font (Noto Sans): the headless test font's lines are shorter, which would make names fit that
-    // don't.
+    // Inter is embedded by the test host (Avalonia.Fonts.Inter). Noto Sans and the system UI font are not on every
+    // runner, and a fallback face wraps "Merge PDFs" (and the rest) differently.
     private static SliceLabelLayout Layout()
     {
         TestServices.EnsureInitialized("en");
-        var family = SoftPalette.FontFamilyFor("en");
-        return new SliceLabelLayout(new LabelFonts(new Typeface(family, FontStyle.Normal, FontWeight.SemiBold), new Typeface(family),
-            FlowDirection.LeftToRight));
+        var family = TestServices.SliceLabelFont;
+        var bold = new Typeface(family, FontStyle.Normal, FontWeight.SemiBold);
+        // The static SemiBold file reports its family as "Inter SemiBold", not "Inter".
+        if (!FontManager.Current.TryGetGlyphTypeface(bold, out var glyphs)
+            || !glyphs.FamilyName.StartsWith("Inter", StringComparison.Ordinal))
+            throw new InvalidOperationException($"Slice labels must measure with embedded Inter, not '{glyphs?.FamilyName}'.");
+        return new SliceLabelLayout(new LabelFonts(bold, new Typeface(family), FlowDirection.LeftToRight));
     }
 
     private static SliceLabelInput Slice(string name, int index, int count, LabelShow show = LabelShow.TextOnly,
@@ -801,13 +805,16 @@ public class SliceLabelLayoutTests
     [AvaloniaFact]
     public void Auto_keeps_the_names_large_rather_than_shrink_them_for_icons()
     {
-        // The six-slice face at 120 %: "Remove background" has no room beside an icon at 15.6 px, so the ring shows its
-        // names alone at 15.6 px rather than smaller names with icons. At 100 % every name has room for its icon.
+        // Embedded Inter, six slices. "Remove background now" has no room beside an icon at 115 % (14.95 px), so the
+        // ring shows every name alone at that size rather than smaller names with icons. At 100 % every name has room
+        // for its icon. (The threshold moves with the face: Inter is not Segoe UI.)
         var layout = Layout();
-        var large = layout.PlanRing(Face(Six, LabelShow.Auto), 1.2, 1, showCaptions: true);
+        string[] names = ["Crop", "Rotate", "Flip", "Remove background now", "Grayscale", "Compress image"];
+        var slices = names.Select((n, i) => Slice(n, i, names.Length, LabelShow.Auto, "crop")).ToList();
+        var large = layout.PlanRing(slices, 1.15, 1, showCaptions: false);
         Assert.All(large, l => Assert.True(l is { Kind: SliceLabelKind.Text, NameWhole: true }));
-        Assert.Equal(13 * 1.2, large[0].Text!.Size, 6);
-        var full = layout.PlanRing(Face(Six, LabelShow.Auto), 1, 1, showCaptions: true);
+        Assert.Equal(13 * 1.15, large[0].Text!.Size, 6);
+        var full = layout.PlanRing(slices, 1, 1, showCaptions: false);
         Assert.All(full, l => Assert.True(l is { Kind: SliceLabelKind.IconAndText, NameWhole: true }));
         Assert.Equal(13, full[0].Text!.Size);
     }

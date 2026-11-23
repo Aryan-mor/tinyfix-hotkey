@@ -2,7 +2,9 @@
 // service container the tests build against a throw-away data folder (the real %APPDATA% is never touched).
 
 using Avalonia;
+using Avalonia.Fonts.Inter;
 using Avalonia.Headless;
+using Avalonia.Media;
 using TinyFix.App;
 using TinyFix.App.Services;
 using TinyFix.Core.Hotkeys;
@@ -12,6 +14,9 @@ using TinyFix.Core.Settings;
 [assembly: AvaloniaTestApplication(typeof(TinyFix.App.Tests.TestAppBuilder))]
 // One application for all tests: Avalonia sets its font manager up per application, which is slow and fragile.
 [assembly: AvaloniaTestIsolation(AvaloniaTestIsolationLevel.PerAssembly)]
+// AppHost, the fake ports and the data folder are process-wide. Parallel classes would race on them (a models-page
+// test can save another protocol while the key-field test reads it).
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace TinyFix.App.Tests;
 
@@ -22,6 +27,8 @@ public static class TestAppBuilder
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UseSkia()
+            // Slice-label tests measure with this face, not whatever UI font the runner has installed.
+            .WithInterFont()
             .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
 }
 
@@ -122,6 +129,19 @@ internal sealed class FakePorts : IClipboardAccess, IKeySender, IForegroundWindo
 
     public void ResetSecretReads() => SecretReads = 0;
 
+    /// <summary>Back to the values a fresh test should see. The change counter is left, so a test can still count its own edits.</summary>
+    public void Reset()
+    {
+        ClipboardText = "clipboard";
+        Selection = null;
+        Focused.Clear();
+        Keys.Clear();
+        AutostartOn = false;
+        Caret = new ScreenPoint(400, 300);
+        Cursor = new ScreenPoint(500, 400);
+        SecretReads = 0;
+    }
+
     public string Get(string provider)
     {
         SecretReads++;
@@ -163,7 +183,11 @@ internal static class TestServices
 
     public static FakeHotkeys Hotkeys { get; } = new();
 
-    /// <summary>The headless runner may create a new Application per run, so services are rebuilt when it changes.</summary>
+    /// <summary>
+    /// The headless runner may create a new Application per run, so services are rebuilt when it changes.
+    /// Every call also puts settings, skills and the fake ports back to defaults: one data folder and one
+    /// <see cref="AppHost"/> serve the whole assembly, and a test must not see what an earlier one saved.
+    /// </summary>
     public static AppServices EnsureInitialized(string language = "en", bool wayland = false)
     {
         var app = Application.Current!;
@@ -180,12 +204,37 @@ internal static class TestServices
             });
             _initializedFor = app;
         }
+        return ResetSharedState(language);
+    }
+
+    private static AppServices ResetSharedState(string language)
+    {
+        // A slider's delayed write must not land on top of the defaults this call just loaded.
+        if (DonutLookSave.IsPending)
+            DonutLookSave.Flush();
+        Ports.Reset();
+        Hotkeys.Suspended = false;
+        Motion.Set(true);
+        var store = AppHost.Services.Store;
+        if (File.Exists(store.SettingsPath))
+            File.Delete(store.SettingsPath);
+        if (File.Exists(store.SkillsPath))
+            File.Delete(store.SkillsPath);
+        store.Load();
         var s = AppHost.Services;
         s.Store.Settings.Language = language;
+        s.Store.SaveSettings();
         s.Loc.SetLanguage(language);
         s.Theme.Apply(s.Loc.Language);
+        AppHost.ApplyHotkeys();
         return s;
     }
+
+    /// <summary>
+    /// The embedded Inter face (<c>fonts:Inter</c> is the collection key), so slice-label measurements do not follow
+    /// the runner's UI font. A plain "Inter" name is the system font and falls back when it is not installed.
+    /// </summary>
+    public static FontFamily SliceLabelFont => new("fonts:Inter#Inter");
 
     /// <summary>Where rendered screenshots go: tests/TinyFix.App.Tests/bin/.../screenshots.</summary>
     public static string ScreenshotDirectory
