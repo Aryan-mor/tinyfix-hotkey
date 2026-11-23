@@ -43,19 +43,6 @@ if ($Runtime -eq 'win-x64') {
     if (-not $IsWindows) { throw "Windows packages have to be built on Windows." }
     $portable = Join-Path $Output "TinyFix-$Version-win-x64.exe"
     Copy-Item -LiteralPath $published -Destination $portable -Force
-
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $zipPath = Join-Path $Output "TinyFix-$Version-win-x64.zip"
-    if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-    $zip = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
-    try {
-        [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $published, 'TinyFix.exe')
-        [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $root 'LICENSE'), 'LICENSE')
-        [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $root 'THIRD-PARTY-NOTICES.md'), 'THIRD-PARTY-NOTICES.md')
-    }
-    finally { $zip.Dispose() }
-
     $iscc = @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "$env:ProgramFiles\Inno Setup 6\ISCC.exe"

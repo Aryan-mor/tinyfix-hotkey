@@ -25,9 +25,19 @@ Fix the text you are typing in any app: select it, press a shortcut, and the cor
 
 Change any of them in **Settings**. A skill does nothing until an AI model is set up under **AI models** (and an API key is saved, when that protocol asks for one).
 
-## Run it
+## Install
 
-Packaged releases are not published yet. Build and run from source with the .NET 10 SDK:
+Download the file for your system from the [latest release](https://github.com/Aryan-mor/tinyfix-hotkey/releases/latest). None of the packages are code-signed, so check the download against `SHA256SUMS.txt` (`Get-FileHash` on Windows, `sha256sum -c` on Linux, `shasum -a 256` on macOS).
+
+| System | File | How |
+| --- | --- | --- |
+| Windows 10/11 (x64) | `TinyFix-<version>-win-x64-Setup.exe` | Run it. It installs for your user, needs no administrator rights and can be removed in Windows Settings. SmartScreen may warn: choose More info, then Run anyway. A portable `TinyFix-<version>-win-x64.exe` needs no install. |
+| macOS (Apple silicon or Intel) | `TinyFix-<version>-osx-arm64.dmg` or `-osx-x64.dmg` | Open the image and drag TinyFix to Applications. It is not notarized: the first time, right-click the app and choose Open. Grant the Accessibility permission when asked. |
+| Linux (x64 or arm64) | `TinyFix-<version>-linux-x64.tar.gz` or `-linux-arm64.tar.gz` | Extract it and run `./install.sh` (installs for your user, `./uninstall.sh` removes it). X11 is needed for global shortcuts. |
+
+## Run from source
+
+With the .NET 10 SDK:
 
 ```sh
 dotnet run --project src/TinyFix.App
@@ -39,7 +49,7 @@ Data (settings, skills, encrypted keys, logs) lives in `%APPDATA%\TinyFix` on Wi
 
 | OS | Status |
 | --- | --- |
-| Windows 10/11 | Developed and tried here. |
+| Windows 10/11 | Developed and tried here (installer tested). |
 | macOS | Adapters written, built and unit-tested in CI only. Needs the Accessibility permission. Not tried on a real Mac. |
 | Linux | X11 only, same status as macOS. Wayland blocks global shortcuts and simulated paste. |
 
