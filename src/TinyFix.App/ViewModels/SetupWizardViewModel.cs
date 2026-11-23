@@ -62,14 +62,15 @@ public sealed partial class SetupStepIndicator : ObservableObject
     }
 }
 
-/// <summary>One provider card.</summary>
+/// <summary>One provider chip.</summary>
 public sealed partial class SetupProviderCard : ObservableObject
 {
     private readonly string _titleKey;
     private readonly string _descriptionKey;
     private readonly Action<string> _select;
+    private bool _applying;
 
-    /// <summary>Creates a card for <paramref name="id"/>.</summary>
+    /// <summary>Creates a chip for <paramref name="id"/>.</summary>
     public SetupProviderCard(string id, string titleKey, string descriptionKey, Action<string> select)
     {
         Id = id;
@@ -94,18 +95,29 @@ public sealed partial class SetupProviderCard : ObservableObject
     [ObservableProperty]
     private string _description = "";
 
-    /// <summary>True when this card is the one in the form below.</summary>
+    /// <summary>True when this chip is the one in the form below.</summary>
     [ObservableProperty]
     private bool _isSelected;
 
     /// <summary>Selects this provider.</summary>
     public IRelayCommand SelectCommand { get; }
 
-    /// <summary>Reloads the name and description for the current language.</summary>
-    public void Refresh(ILocalizer loc)
+    /// <summary>Reloads the name and description, and whether this chip is selected, without selecting it again.</summary>
+    public void Refresh(ILocalizer loc, bool selected)
     {
         Title = loc[_titleKey];
         Description = loc[_descriptionKey];
+        if (IsSelected == selected)
+            return;
+        _applying = true;
+        IsSelected = selected;
+        _applying = false;
+    }
+
+    partial void OnIsSelectedChanged(bool value)
+    {
+        if (value && !_applying)
+            _select(Id);
     }
 }
 
@@ -180,6 +192,9 @@ public sealed partial class SetupSkillRowViewModel : ObservableObject
     [ObservableProperty]
     private string _conflict = "";
 
+    /// <summary>True when the shortcut is not the one the row started with. The reset icon shows only then.</summary>
+    public bool ShortcutChanged => !string.Equals(Shortcut.Trim(), DefaultShortcut(), StringComparison.Ordinal);
+
     /// <summary>Accessible name of the reset button.</summary>
     public string ResetName => _services.Loc.Format("setup.skills.reset_named", Name);
 
@@ -223,6 +238,7 @@ public sealed partial class SetupSkillRowViewModel : ObservableObject
 
     partial void OnShortcutChanged(string value)
     {
+        OnPropertyChanged(nameof(ShortcutChanged));
         if (_loading)
             return;
         var next = string.IsNullOrWhiteSpace(value) ? "none" : value.Trim();
@@ -323,9 +339,9 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
         for (var step = 0; step < Order.Count; step++)
             Indicators.Add(new SetupStepIndicator(step, StepKey(Order[step])));
 
+        SkillRows.Add(SetupSkillRowViewModel.ForMenu(services, this));
         foreach (var skill in services.Store.Skills.Skills)
             SkillRows.Add(SetupSkillRowViewModel.ForSkill(services, this, skill));
-        SkillRows.Add(SetupSkillRowViewModel.ForMenu(services, this));
 
         _step = start;
         _loading = false;
@@ -341,7 +357,7 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
     /// <summary>The main endpoint. The key box is the shared editor; a saved key is never copied into <see cref="EndpointEditorViewModel.ApiKey"/>.</summary>
     public EndpointEditorViewModel Endpoint { get; }
 
-    /// <summary>Provider cards, in the same order as <see cref="LlmProtocols.All"/>.</summary>
+    /// <summary>Provider chips, in the same order as <see cref="LlmProtocols.All"/>.</summary>
     public ObservableCollection<SetupProviderCard> Providers { get; } = [];
 
     /// <summary>The four step labels.</summary>
@@ -350,7 +366,7 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
     /// <summary>"Automatic" and every shipped language.</summary>
     public ObservableCollection<LanguageOption> Languages { get; } = [];
 
-    /// <summary>Every skill, then the donut-menu shortcut.</summary>
+    /// <summary>The donut-menu shortcut, then every skill.</summary>
     public ObservableCollection<SetupSkillRowViewModel> SkillRows { get; } = [];
 
     /// <summary>Which way the last step change moved: 1 forward, -1 back. The window uses it for the slide.</summary>
@@ -412,6 +428,9 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
 
     /// <summary>Continue, or Finish on the last step.</summary>
     public string ContinueLabel => _services.Loc[Step == SetupStep.Done ? "setup.finish" : "setup.continue"];
+
+    /// <summary>True after a connection test succeeded on the model step, so Enter activates Continue.</summary>
+    public bool ContinueIsDefault => IsModel && TestSucceeded;
 
     /// <summary>True on the welcome step.</summary>
     public bool IsWelcome => Step == SetupStep.Welcome;
@@ -483,6 +502,32 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
 
     /// <summary>True when the key field is on screen. Local presets need no key.</summary>
     public bool ShowKey => !LlmProtocols.IsLocalPreset(Endpoint.Protocol);
+
+    /// <summary>True when the model step should focus the key box: this provider needs a key and none is saved.</summary>
+    public bool FocusApiKey
+    {
+        get
+        {
+            if (!ShowKey || !Endpoint.ShowInput || Endpoint.HasSavedKey)
+                return false;
+            var settings = Endpoint.ToSettings();
+            var protocol = LlmProtocols.Normalize(settings.Protocol);
+            var baseUrl = string.IsNullOrWhiteSpace(settings.BaseUrl) ? LlmProtocols.DefaultBaseUrl(protocol) : settings.BaseUrl.Trim();
+            return LlmProtocols.RequiresKey(protocol, baseUrl);
+        }
+    }
+
+    /// <summary>The one-line description of the selected provider.</summary>
+    public string ProviderDescription
+    {
+        get
+        {
+            foreach (var card in Providers)
+                if (card.IsSelected)
+                    return card.Description;
+            return "";
+        }
+    }
 
     /// <summary>The provider's key page, or null when there is no known page.</summary>
     public string? KeyPageUrl => KeyPage(Endpoint.Protocol);
@@ -558,7 +603,7 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
         _ => loc["setup.test_other"],
     };
 
-    /// <summary>Selects a provider card and fills its default model. Choosing one leaves "set up later".</summary>
+    /// <summary>Selects a provider chip and fills its default model. Choosing one leaves "set up later".</summary>
     public void SelectProvider(string protocol)
     {
         var index = 0;
@@ -653,6 +698,10 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
     /// <summary>Closes the window and does not ask again. Fields already chosen are kept.</summary>
     [RelayCommand]
     private void Skip() => FinishSetup();
+
+    /// <summary>Turns "set up later" on or off. Choosing a provider turns it off.</summary>
+    [RelayCommand]
+    private void ToggleLater() => SetupLater = !SetupLater;
 
     /// <summary>Opens the provider's key page.</summary>
     [RelayCommand]
@@ -779,6 +828,7 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(TestFailed));
         OnPropertyChanged(nameof(HasTestResult));
+        OnPropertyChanged(nameof(ContinueIsDefault));
     }
 
     private void Move(int delta)
@@ -819,21 +869,36 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
         if (e.PropertyName is nameof(EndpointEditorViewModel.ProtocolIndex)
             or nameof(EndpointEditorViewModel.Model)
             or nameof(EndpointEditorViewModel.BaseUrl)
+            or nameof(EndpointEditorViewModel.ApiKey))
+            ClearTestResult();
+        if (e.PropertyName is nameof(EndpointEditorViewModel.ProtocolIndex)
+            or nameof(EndpointEditorViewModel.Model)
+            or nameof(EndpointEditorViewModel.BaseUrl)
             or nameof(EndpointEditorViewModel.ApiKey)
             or nameof(EndpointEditorViewModel.HasSavedKey)
             or nameof(EndpointEditorViewModel.State))
             RefreshCards();
     }
 
+    private void ClearTestResult()
+    {
+        if (Testing || _loading)
+            return;
+        if (!TestSucceeded && TestHeadline.Length == 0 && TestDetail.Length == 0)
+            return;
+        TestSucceeded = false;
+        TestHeadline = "";
+        TestDetail = "";
+    }
+
     private void RefreshCards()
     {
         foreach (var card in Providers)
-        {
-            card.Refresh(_services.Loc);
-            card.IsSelected = card.Id == Endpoint.Protocol;
-        }
+            card.Refresh(_services.Loc, card.Id == Endpoint.Protocol);
         OnPropertyChanged(nameof(ShowBaseUrl));
         OnPropertyChanged(nameof(ShowKey));
+        OnPropertyChanged(nameof(FocusApiKey));
+        OnPropertyChanged(nameof(ProviderDescription));
         OnPropertyChanged(nameof(ShowGetKey));
         OnPropertyChanged(nameof(KeyPageUrl));
         NotifyCanContinue();
@@ -851,6 +916,7 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Headline));
         OnPropertyChanged(nameof(Subtitle));
         OnPropertyChanged(nameof(ContinueLabel));
+        OnPropertyChanged(nameof(ContinueIsDefault));
         OnPropertyChanged(nameof(IsWelcome));
         OnPropertyChanged(nameof(IsModel));
         OnPropertyChanged(nameof(IsSkills));

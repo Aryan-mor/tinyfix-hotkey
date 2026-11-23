@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -15,6 +16,7 @@ using Avalonia.VisualTree;
 using TinyFix.App.Services;
 using TinyFix.App.ViewModels;
 using TinyFix.App.Views;
+using TinyFix.App.Views.Controls;
 using TinyFix.Core.Hotkeys;
 using TinyFix.Core.Llm;
 using TinyFix.Core.Settings;
@@ -222,7 +224,7 @@ public class SetupWizardTests
         var s = TestServices.EnsureInitialized();
         using var vm = new SetupWizardViewModel(s, SetupStep.Skills);
         Assert.Equal(s.Store.Skills.Skills.Count + 1, vm.SkillRows.Count);
-        var menu = vm.SkillRows[^1];
+        var menu = vm.SkillRows[0];
         Assert.True(menu.IsMenu);
         Assert.False(menu.ShowToggle);
         Assert.Equal(HotkeyDefaults.Menu, menu.Shortcut);
@@ -232,6 +234,7 @@ public class SetupWizardTests
         var rewrite = vm.SkillRows.First(row => row.SkillId == SkillIds.Rewrite);
         Assert.True(fix.Enabled);
         Assert.False(rewrite.Enabled);
+        Assert.False(fix.ShortcutChanged);
         Assert.Contains(s.Loc["setup.skill.fix.desc"], fix.Description);
         Assert.Contains(s.Loc["setup.skills.menu_desc"], menu.Description);
 
@@ -239,11 +242,13 @@ public class SetupWizardTests
         Assert.True(s.Store.Skills.Get(SkillIds.Rewrite)!.Enabled);
 
         fix.Shortcut = HotkeyDefaults.Translate;
+        Assert.True(fix.ShortcutChanged);
         Assert.Equal(HotkeyDefaults.Translate, s.Store.Skills.Get(SkillIds.Fix)!.Hotkey);
         Assert.Contains("Fix", fix.Conflict);
         Assert.Contains("Translate", translate.Conflict);
 
         fix.ResetShortcutCommand.Execute(null);
+        Assert.False(fix.ShortcutChanged);
         Assert.Equal(HotkeyDefaults.Fix, fix.Shortcut);
         Assert.Equal(HotkeyDefaults.Fix, s.Store.Skills.Get(SkillIds.Fix)!.Hotkey);
         Assert.Equal("", fix.Conflict);
@@ -340,20 +345,31 @@ public class SetupWizardTests
     {
         foreach (var step in SetupWizardViewModel.Order)
             foreach (var language in new[] { "en", "fa" })
-                foreach (var scale in new[] { 1.0, 1.25 })
-                    yield return [step, language, scale];
+                foreach (var theme in new[] { "light", "dark" })
+                    foreach (var scale in new[] { 1.0, 1.25 })
+                        yield return [step, language, theme, scale];
+    }
+
+    public static IEnumerable<object[]> ModelLayouts()
+    {
+        foreach (var protocol in new[] { LlmProtocols.Google, LlmProtocols.OpenRouter, LlmProtocols.OpenAi, LlmProtocols.Anthropic })
+            foreach (var scale in new[] { 1.0, 1.25 })
+                yield return [protocol, scale, false];
+        yield return [LlmProtocols.Google, 1.0, true];
+        yield return [LlmProtocols.Google, 1.25, true];
     }
 
     [AvaloniaTheory]
     [MemberData(nameof(StepShots))]
-    public void Setup_steps_render_without_clipped_text(SetupStep step, string language, double scale)
+    public void Setup_steps_render_without_clipped_text(SetupStep step, string language, string theme, double scale)
     {
         var s = TestServices.EnsureInitialized(language);
+        s.Store.Settings.Theme = theme;
+        s.Theme.Apply(language);
         Motion.Set(false);
-        if (scale > 1)
-            UiZoom.Set(scale, remember: false);
+        UiZoom.Set(scale, remember: false);
         var vm = new SetupWizardViewModel(s, step);
-        var window = new SetupWindow(vm) { Width = 760 * scale, Height = 600 * scale };
+        var window = new SetupWindow(vm) { Width = 776 * scale, Height = 639 * scale };
         try
         {
             window.Show();
@@ -361,17 +377,276 @@ public class SetupWizardTests
             Assert.Equal(language == "fa" ? FlowDirection.RightToLeft : FlowDirection.LeftToRight, window.FlowDirection);
             Assert.Equal(s.Loc["setup.window_title"], window.Title);
             AssertNoClippedText(window);
+            AssertNoNestedScroll(window);
             Assert.DoesNotContain(window.GetVisualDescendants().OfType<TextBox>(), box => (box.Text ?? "").Contains("sk-", StringComparison.Ordinal));
             var suffix = scale > 1 ? "-125" : "";
-            RenderTests.Save(window, $"setup-{step.ToString().ToLowerInvariant()}-{language}{suffix}.png");
+            RenderTests.Save(window, $"setup-{step.ToString().ToLowerInvariant()}-{language}-{theme}{suffix}.png");
         }
         finally
         {
             window.Close();
             UiZoom.Set(1, remember: false);
             Motion.Set(true);
+            s.Store.Settings.Theme = "system";
+            s.Theme.Apply("en");
             if (language != "en")
                 TestServices.EnsureInitialized("en");
+        }
+    }
+
+    [AvaloniaTheory]
+    [MemberData(nameof(ModelLayouts))]
+    public void The_model_step_keeps_the_key_and_the_test_button_in_view(string protocol, double scale, bool savedKey)
+    {
+        var s = TestServices.EnsureInitialized();
+        if (savedKey)
+            TestServices.Ports.Set(LlmSecrets.MainSlot, "sk-saved-value");
+        Motion.Set(false);
+        UiZoom.Set(scale, remember: false);
+        var vm = new SetupWizardViewModel(s, SetupStep.Model);
+        if (protocol != LlmProtocols.Google)
+            vm.SelectProvider(protocol);
+        var window = new SetupWindow(vm) { Width = 776, Height = 639 };
+        try
+        {
+            window.Show();
+            Settle(window);
+            Assert.Equal(0, window.FindControl<ScrollViewer>("BodyScroll")!.Offset.Y, 1);
+            AssertNoNestedScroll(window);
+            var chip = window.GetVisualDescendants().OfType<RadioButton>().First(button => button.IsChecked == true);
+            AssertInWindow(chip, window);
+            AssertInWindow(window.FindControl<TextBox>("ModelBox")!, window);
+            AssertInWindow(window.FindControl<Button>("TestButton")!, window);
+            if (savedKey)
+            {
+                var mask = window.GetVisualDescendants().OfType<TextBlock>().First(block => block.Text == EndpointEditorViewModel.SavedKeyMask);
+                AssertInWindow(mask, window);
+                Assert.DoesNotContain(window.GetVisualDescendants().OfType<TextBlock>(), block => (block.Text ?? "").Contains("sk-saved-value", StringComparison.Ordinal));
+            }
+            else
+            {
+                var box = window.GetVisualDescendants().OfType<TextBox>().First(item => item.FindAncestorOfType<ApiKeyField>() is not null && item.IsEffectivelyVisible);
+                AssertInWindow(box, window);
+            }
+            Assert.DoesNotContain(window.GetVisualDescendants().OfType<TextBox>(), box => (box.Text ?? "").Contains("sk-", StringComparison.Ordinal));
+        }
+        finally
+        {
+            window.Close();
+            UiZoom.Set(1, remember: false);
+            Motion.Set(true);
+            TestServices.Ports.Keys.Clear();
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    public void The_skills_step_shows_at_least_five_rows(double scale)
+    {
+        var s = TestServices.EnsureInitialized();
+        Motion.Set(false);
+        UiZoom.Set(scale, remember: false);
+        var vm = new SetupWizardViewModel(s, SetupStep.Skills);
+        var window = new SetupWindow(vm) { Width = 776, Height = 639 };
+        try
+        {
+            window.Show();
+            Settle(window);
+            AssertNoNestedScroll(window);
+            var rows = window.GetVisualDescendants().OfType<Border>().Where(border => border.Classes.Contains("skill-row")).ToList();
+            Assert.True(((SetupSkillRowViewModel)rows[0].DataContext!).IsMenu);
+            var visible = rows.Count(row => FullyInside(row, window));
+            Assert.True(visible >= 5, $"visible {visible} of {rows.Count} at {scale}");
+        }
+        finally
+        {
+            window.Close();
+            UiZoom.Set(1, remember: false);
+            Motion.Set(true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task The_model_step_focuses_the_key_or_the_model_and_arrows_move_the_provider()
+    {
+        var s = TestServices.EnsureInitialized();
+        Motion.Set(false);
+        var vm = new SetupWizardViewModel(s);
+        var window = new SetupWindow(vm) { Width = 776, Height = 639 };
+        try
+        {
+            window.Show();
+            Settle(window);
+            vm.ContinueCommand.Execute(null);
+            await Flush();
+            var key = FocusedKeyBox(window);
+            Assert.NotNull(key);
+
+            window.Focus();
+            var chips = window.GetVisualDescendants().OfType<RadioButton>().ToList();
+            chips[0].Focus();
+            window.KeyPressQwerty(PhysicalKey.ArrowRight, RawInputModifiers.None);
+            await Flush();
+            Assert.Equal(LlmProtocols.OpenRouter, vm.Endpoint.Protocol);
+            Assert.True(chips[1].IsChecked);
+
+            vm.SelectProvider(LlmProtocols.Ollama);
+            window.Close();
+        }
+        finally
+        {
+            if (window.IsVisible)
+                window.Close();
+            Motion.Set(true);
+        }
+
+        using var local = new SetupWizardViewModel(s, SetupStep.Model);
+        local.SelectProvider(LlmProtocols.Ollama);
+        var again = new SetupWindow(local) { Width = 776, Height = 639 };
+        try
+        {
+            again.Show();
+            Settle(again);
+            await Flush();
+            Assert.Same(again.FindControl<TextBox>("ModelBox"), again.FocusManager?.GetFocusedElement());
+        }
+        finally
+        {
+            again.Close();
+        }
+
+        TestServices.Ports.Set(LlmSecrets.MainSlot, "sk-saved-value");
+        using var saved = new SetupWizardViewModel(s, SetupStep.Model);
+        saved.SelectProvider(LlmProtocols.Google);
+        var savedWindow = new SetupWindow(saved) { Width = 776, Height = 639 };
+        try
+        {
+            savedWindow.Show();
+            Settle(savedWindow);
+            await Flush();
+            Assert.Same(savedWindow.FindControl<TextBox>("ModelBox"), savedWindow.FocusManager?.GetFocusedElement());
+            Assert.DoesNotContain("sk-saved-value", savedWindow.GetVisualDescendants().OfType<TextBox>().Select(box => box.Text ?? ""));
+        }
+        finally
+        {
+            savedWindow.Close();
+            TestServices.Ports.Keys.Clear();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Enter_in_the_key_box_runs_the_test_and_then_continue()
+    {
+        var s = TestServices.EnsureInitialized();
+        Motion.Set(false);
+        ScriptedHttp.Status = HttpStatusCode.OK;
+        ScriptedHttp.Body = """{"candidates":[{"content":{"parts":[{"text":"OK"}]}}]}""";
+        var vm = new SetupWizardViewModel(s, SetupStep.Model);
+        var window = new SetupWindow(vm) { Width = 776, Height = 639 };
+        try
+        {
+            window.Show();
+            Settle(window);
+            await Flush();
+            var key = FocusedKeyBox(window);
+            Assert.NotNull(key);
+            vm.Endpoint.ApiKey = "sk-fake-wizard";
+            window.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+            await WaitUntil(() => vm.TestSucceeded);
+            Assert.False(vm.Testing);
+            Assert.Contains("ms", vm.TestHeadline);
+            Assert.DoesNotContain("sk-fake-wizard", vm.TestHeadline + vm.TestDetail);
+            var success = window.FindControl<StackPanel>("TestSuccess");
+            Assert.NotNull(success);
+            Assert.True(success.IsEffectivelyVisible);
+            Assert.Contains(success.GetVisualDescendants().OfType<PathIcon>(), icon => icon.IsEffectivelyVisible);
+            var continueButton = window.FindControl<Button>("ContinueButton")!;
+            Assert.True(continueButton.IsDefault);
+            Assert.Same(continueButton, window.FocusManager?.GetFocusedElement());
+
+            window.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+            await Flush();
+            Assert.Equal(SetupStep.Skills, vm.Step);
+        }
+        finally
+        {
+            if (window.IsVisible)
+                window.Close();
+            ScriptedHttp.Reset();
+            Motion.Set(true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task A_failed_test_keeps_the_plain_reason_and_the_detail_in_an_expander()
+    {
+        var s = TestServices.EnsureInitialized();
+        Motion.Set(false);
+        ScriptedHttp.Status = HttpStatusCode.Unauthorized;
+        ScriptedHttp.Body = "rejected";
+        var vm = new SetupWizardViewModel(s, SetupStep.Model);
+        vm.Endpoint.ApiKey = "sk-fake-wizard";
+        var window = new SetupWindow(vm) { Width = 776, Height = 639 };
+        try
+        {
+            window.Show();
+            Settle(window);
+            await vm.TestCommand.ExecuteAsync(null);
+            await Flush();
+            Assert.Equal(s.Loc["setup.test_wrong_key"], vm.TestHeadline);
+            var expander = window.GetVisualDescendants().OfType<Expander>().Single();
+            Assert.False(expander.IsExpanded);
+            Assert.Equal(s.Loc["setup.test_details"], expander.Header as string);
+            var detail = Assert.IsType<TextBlock>(expander.Content);
+            Assert.Contains("401", detail.Text);
+            Assert.DoesNotContain("sk-fake-wizard", detail.Text);
+            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), block => block.IsEffectivelyVisible && block.Text == s.Loc["setup.test_wrong_key"]);
+        }
+        finally
+        {
+            window.Close();
+            ScriptedHttp.Reset();
+            Motion.Set(true);
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData("light")]
+    [InlineData("dark")]
+    public void Continue_stays_accent_until_it_is_disabled(string theme)
+    {
+        var s = TestServices.EnsureInitialized();
+        s.Store.Settings.Theme = theme;
+        s.Theme.Apply("en");
+        Motion.Set(false);
+        var vm = new SetupWizardViewModel(s);
+        var window = new SetupWindow(vm) { Width = 776, Height = 639 };
+        try
+        {
+            window.Show();
+            Settle(window);
+            var button = window.FindControl<Button>("ContinueButton")!;
+            var enabled = ButtonColors(button);
+            Assert.True(button.Opacity > 0.99);
+            Assert.True(Contrast(enabled.Fg, enabled.Bg) >= 4.5, $"enabled {Contrast(enabled.Fg, enabled.Bg):0.00}");
+            Assert.Equal(127, enabled.Bg.R);
+            Assert.Equal(119, enabled.Bg.G);
+            Assert.Equal(221, enabled.Bg.B);
+
+            vm.ContinueCommand.Execute(null);
+            Settle(window);
+            Assert.False(button.IsEffectivelyEnabled);
+            var disabled = ButtonColors(button);
+            Assert.True(Contrast(disabled.Fg, disabled.Bg) >= 4.5, $"disabled {Contrast(disabled.Fg, disabled.Bg):0.00}");
+            Assert.True(Contrast(enabled.Bg, disabled.Bg) >= 1.4, $"fills {Contrast(enabled.Bg, disabled.Bg):0.00}");
+        }
+        finally
+        {
+            window.Close();
+            Motion.Set(true);
+            s.Store.Settings.Theme = "system";
+            s.Theme.Apply("en");
         }
     }
 
@@ -449,6 +724,84 @@ public class SetupWizardTests
         first.Close();
         Assert.Null(s.Windows.Setup);
         Assert.True(s.Store.Settings.SetupCompleted);
+    }
+
+    private static void Settle(Window window)
+    {
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    private static Task Flush() => Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background).GetTask();
+
+    private static async Task WaitUntil(Func<bool> done)
+    {
+        var until = DateTime.UtcNow.AddSeconds(5);
+        while (!done() && DateTime.UtcNow < until)
+        {
+            await Flush();
+            await Task.Delay(20);
+        }
+        Assert.True(done());
+    }
+
+    private static TextBox? FocusedKeyBox(Window window) =>
+        window.FocusManager?.GetFocusedElement() as TextBox is { } box && box.FindAncestorOfType<ApiKeyField>() is not null ? box : null;
+
+    private static void AssertNoNestedScroll(Window window)
+    {
+        foreach (var viewer in window.GetVisualDescendants().OfType<ScrollViewer>())
+        {
+            if (viewer.TemplatedParent is not null)
+                continue;
+            var nested = viewer.GetVisualAncestors().OfType<ScrollViewer>().Any(parent => parent.TemplatedParent is null);
+            Assert.False(nested, viewer.Name);
+        }
+    }
+
+    private static void AssertInWindow(Control control, Window window)
+    {
+        Assert.True(control.IsEffectivelyVisible, control.GetType().Name);
+        Assert.True(FullyInside(control, window), $"{control.GetType().Name} {control.Bounds} in {window.ClientSize}");
+    }
+
+    private static bool FullyInside(Control control, Window window)
+    {
+        if (!control.IsEffectivelyVisible || control.Bounds.Width < 1 || control.Bounds.Height < 1)
+            return false;
+        var origin = control.TranslatePoint(default, window);
+        var end = control.TranslatePoint(new Point(control.Bounds.Width, control.Bounds.Height), window);
+        if (origin is null || end is null)
+            return false;
+        return origin.Value.X >= -1 && origin.Value.Y >= -1
+            && end.Value.X <= window.ClientSize.Width + 1
+            && end.Value.Y <= window.ClientSize.Height + 1;
+    }
+
+    private static (Color Bg, Color Fg) ButtonColors(Button button)
+    {
+        var presenter = button.GetVisualDescendants().OfType<ContentPresenter>().First(item => item.Name == "PART_ContentPresenter");
+        var background = Assert.IsAssignableFrom<ISolidColorBrush>(presenter.Background);
+        var foreground = Assert.IsAssignableFrom<ISolidColorBrush>(presenter.Foreground);
+        return (background.Color, foreground.Color);
+    }
+
+    private static double Contrast(Color a, Color b)
+    {
+        var lighter = Math.Max(Luminance(a), Luminance(b));
+        var darker = Math.Min(Luminance(a), Luminance(b));
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static double Luminance(Color color)
+    {
+        static double Channel(byte value)
+        {
+            var c = value / 255d;
+            return c <= 0.04045 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
+        }
+        return 0.2126 * Channel(color.R) + 0.7152 * Channel(color.G) + 0.0722 * Channel(color.B);
     }
 
     private static void AssertNoClippedText(Window window)
