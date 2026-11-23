@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import socket
+import threading
+import urllib.parse
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -347,31 +349,56 @@ def fallback_config(config: LLMConfig) -> LLMConfig | None:
     return dataclasses.replace(config, provider=provider, api_key=key, model=backup)
 
 
+_used = threading.local()
+
+
+def reset_source() -> None:
+    _used.letter = ""
+
+
+def last_source() -> str:
+    """Which model answered the last request on this thread: M main, F fallback, L local, "" nothing."""
+    return getattr(_used, "letter", "")
+
+
+def _is_local_config(config: LLMConfig) -> bool:
+    if config.provider != PROVIDER_OPENAI:
+        return False
+    host = (urllib.parse.urlparse(config.base_url or "").hostname or "").lower()
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
+def _attempt(config: LLMConfig, prompt: str, timeout: float, letter: str) -> str:
+    result = _complete_once(config, prompt, timeout)
+    _used.letter = "L" if _is_local_config(config) else letter
+    return result
+
+
 def _complete_with_fallback(config: LLMConfig, prompt: str, timeout: float) -> str:
     """Main model first. After it fails in a way another model could fix, the fallback answers for a while."""
     import time
 
     backup_config = fallback_config(config)
     if backup_config is None:
-        return _complete_once(config, prompt, timeout)
+        return _attempt(config, prompt, timeout, "M")
     main = (config.model or _default_model_for(config.provider)).strip()
     key = f"{config.provider}:{main}"
     backup = f"{backup_config.provider}:{backup_config.model}"
     if _fallback_until.get(key, 0.0) > time.monotonic():
         try:
-            return _complete_once(backup_config, prompt, timeout)
+            return _attempt(backup_config, prompt, timeout, "F")
         except LLMError as exc:
             logger.info("Fallback model %s failed (%s); trying %s", backup, exc, main)
-            return _complete_once(config, prompt, timeout)
+            return _attempt(config, prompt, timeout, "M")
     try:
-        return _complete_once(config, prompt, timeout)
+        return _attempt(config, prompt, timeout, "M")
     except LLMError as exc:
         if not _fallback_worthy(exc):
             raise
         logger.info("Model %s failed (%s); using %s for the next %.0f s", main, exc, backup, FALLBACK_WINDOW_SECONDS)
         _fallback_until[key] = time.monotonic() + FALLBACK_WINDOW_SECONDS
         try:
-            return _complete_once(backup_config, prompt, timeout)
+            return _attempt(backup_config, prompt, timeout, "F")
         except LLMError:
             _fallback_until.pop(key, None)
             raise exc
@@ -572,11 +599,13 @@ def correct_with_fallback(text: str, engine, config: LLMConfig | None) -> tuple[
             if not english:
                 raise LLMError(f"Online correction failed ({exc.__class__.__name__})") from exc
             logger.info("Online correction failed; falling back to the offline engine", exc_info=True)
+        _used.letter = "L"
         if engine is None:
             return text, "fallback"
         return engine.fix(text), "fallback"
     if not english:
         return text, "unsupported"
+    _used.letter = "L"
     if engine is None:
         return text, "offline"
     return engine.fix(text), "offline"

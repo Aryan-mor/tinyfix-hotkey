@@ -29,7 +29,9 @@ WM_TRAY = WM_USER + 20
 WM_BUSY = WM_USER + 21
 WM_ALERT = WM_USER + 22
 WM_TIMER = 0x0113
-TIMER_SHOW, TIMER_ANIM, TIMER_ALERT = 1, 2, 3
+TIMER_SHOW, TIMER_ANIM, TIMER_ALERT, TIMER_RESULT = 1, 2, 3, 4
+RESULT_MS = 900  # how long the M / F / L letter stays before the tick returns
+RESULT_TIPS = {"M": "TinyFix: main model", "F": "TinyFix: fallback model", "L": "TinyFix: local"}
 ALERT_FRAME_MS = 110
 ALERT_CYCLES = 3  # full bounces before the normal icon comes back
 ALERT_TIP = "TinyFix: something failed"
@@ -204,6 +206,7 @@ class TrayIcon:
         items: list[MenuItem],
         working_icon_paths: tuple[Path, ...] | list[Path] = (),
         alert_icon_paths: tuple[Path, ...] | list[Path] = (),
+        result_icon_paths: dict[str, Path] | None = None,
     ) -> None:
         self.name = name
         self.icon_path = icon_path
@@ -228,6 +231,9 @@ class TrayIcon:
         self._alert_icons: list[object] = []
         self.alert_shown = False  # True while the bouncing red alert icon is on screen
         self.alert_frame = 0
+        self.result_icon_paths = {k: Path(v) for k, v in (result_icon_paths or {}).items()}
+        self._result_icons: dict[str, object] = {}
+        self._result_shown = False
 
     # ------------------------------------------------------------------ public
 
@@ -265,6 +271,9 @@ class TrayIcon:
             if self._hicon and self._icon_owned:
                 user32.DestroyIcon(self._hicon)
             self._hicon = None
+            for handle in list(self._result_icons.values()):
+                user32.DestroyIcon(handle)
+            self._result_icons = {}
             for handle in self._working_icons:
                 user32.DestroyIcon(handle)
             self._working_icons = []
@@ -276,11 +285,11 @@ class TrayIcon:
         if hwnd:
             user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
 
-    def set_busy(self, busy: bool) -> None:
+    def set_busy(self, busy: bool, letter: str = "") -> None:
         """Show or hide the animated working icon. Safe from any thread; it only posts a message."""
         hwnd = self.hwnd
         if hwnd:
-            user32.PostMessageW(hwnd, WM_BUSY, 1 if busy else 0, 0)
+            user32.PostMessageW(hwnd, WM_BUSY, 1 if busy else 0, ord(letter[0]) if (letter and not busy) else 0)
 
     def set_alert(self) -> None:
         """Bounce a white "!" on a red circle in the tray to show something failed. Safe from any thread."""
@@ -372,14 +381,34 @@ class TrayIcon:
         data.szTip = _clip(tip, MAX_TIP)
         shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
 
-    def _on_busy(self, busy: bool) -> None:
+    def _on_busy(self, busy: bool, letter: str = "") -> None:
         if busy:
             if self.working_shown or self._show_pending or self.alert_shown:
                 return
             self._show_pending = True
             user32.SetTimer(self.hwnd, TIMER_SHOW, SHOW_DELAY_MS, None)
         else:
+            was_working = self.working_shown
             self._stop_working()
+            icon = self.result_icon_paths.get(letter)
+            if icon and was_working and not self.alert_shown and self.hwnd:
+                handle = self._result_icons.get(letter)
+                if handle is None:
+                    handle = self._load_file_icon(icon)
+                    if handle:
+                        self._result_icons[letter] = handle
+                if handle:
+                    self._set_icon(handle, RESULT_TIPS.get(letter, "TinyFix"))
+                    self._result_shown = True
+                    user32.SetTimer(self.hwnd, TIMER_RESULT, RESULT_MS, None)
+
+    def _stop_result(self) -> None:
+        if self.hwnd:
+            user32.KillTimer(self.hwnd, TIMER_RESULT)
+        if self._result_shown:
+            self._result_shown = False
+            if not self.alert_shown and not self.working_shown:
+                self._set_icon(self._hicon, self.title)
 
     def _stop_working(self) -> None:
         if self.hwnd:
@@ -401,9 +430,13 @@ class TrayIcon:
             if not icons:
                 return
             self.working_shown = True
+            self._result_shown = False
+            user32.KillTimer(self.hwnd, TIMER_RESULT)
             self.working_frame = 0
             self._set_icon(icons[0], WORKING_TIP)
             user32.SetTimer(self.hwnd, TIMER_ANIM, FRAME_MS, None)
+        elif timer_id == TIMER_RESULT:
+            self._stop_result()
         elif timer_id == TIMER_ALERT:
             if not (self.alert_shown and self._alert_icons):
                 self._stop_alert()
@@ -477,7 +510,7 @@ class TrayIcon:
                 self._add_icon()
                 return 0
             if message == WM_BUSY:
-                self._on_busy(bool(wparam))
+                self._on_busy(bool(wparam), chr(lparam) if (lparam and not wparam) else "")
                 return 0
             if message == WM_ALERT:
                 self._on_alert()

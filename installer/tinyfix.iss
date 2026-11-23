@@ -1,5 +1,5 @@
 #define MyAppName "TinyFix Hotkey"
-#define MyAppVersion "1.5.13"
+#define MyAppVersion "1.5.14"
 #define MyAppPublisher "Aryan Moradi"
 #define MyAppURL "https://github.com/Aryan-mor/tinyfix-hotkey"
 #define MyAppExeName "TinyFix.exe"
@@ -96,10 +96,24 @@ var
   PrefillDone: Boolean;
   AppWasRunning: Boolean;
 
+function AppDirPath: String;
+begin
+  { The app folder constant throws until the folder page was passed, so fall back to the wizard value. }
+  try
+    Result := ExpandConstant('{app}');
+  except
+    try
+      Result := WizardDirValue;
+    except
+      Result := ExpandConstant('{localappdata}\Programs\TinyFix Hotkey');
+    end;
+  end;
+end;
+
 function IsUpgrade: Boolean;
 begin
   { An earlier TinyFix is already in the install folder (Setup reuses the folder it was installed to). }
-  Result := FileExists(ExpandConstant('{app}\{#MyAppExeName}'));
+  Result := FileExists(AppDirPath + '\{#MyAppExeName}');
 end;
 
 function ShowLaunchCheckbox: Boolean;
@@ -168,7 +182,7 @@ var
   Path, Value: String;
 begin
   Result := Fallback;
-  Path := ExpandConstant('{app}\config.ini');
+  Path := AppDirPath + '\config.ini';
   if FileExists(Path) then
   begin
     Value := Trim(GetIniString('TinyFix', Key, '', Path));
@@ -573,7 +587,7 @@ begin
   begin
     ChosenHotkey := ResolveHotkey('HOTKEY', 'hotkey', ChosenHotkey, DefaultHotkey);
     ChosenHotkeyAll := ResolveHotkey('HOTKEYALL', 'hotkey_all', ChosenHotkeyAll, DefaultHotkeyAll);
-    Path := ExpandConstant('{app}\config.ini');
+    Path := AppDirPath + '\config.ini';
     SetIniString('TinyFix', 'hotkey', ChosenHotkey, Path);
     SetIniString('TinyFix', 'hotkey_all', ChosenHotkeyAll, Path);
     SetIniString('TinyFix', 'hotkey_translate', ResolveHotkey('HOTKEYTRANSLATE', 'hotkey_translate', '', DefaultHotkeyTranslate), Path);
@@ -584,7 +598,7 @@ begin
         Log('Relaunching TinyFix because it was running before install')
       else
         Log('Launching TinyFix because /LAUNCH was given');
-      Exec(ExpandConstant('{app}\{#MyAppExeName}'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, ResultCode);
+      Exec(AppDirPath + '\{#MyAppExeName}', '', AppDirPath, SW_SHOWNORMAL, ewNoWait, ResultCode);
     end;
   end;
 end;
@@ -600,7 +614,7 @@ begin
     end;
   end;
   if not FileExists(Result) then
-    Result := ExpandConstant('{app}\stop-tinyfix-in-dir.ps1');
+    Result := AppDirPath + '\stop-tinyfix-in-dir.ps1';
 end;
 
 function RunTinyFixStopScript(const ListOnly: Boolean): Integer;
@@ -615,7 +629,7 @@ begin
     Log('stop-tinyfix-in-dir.ps1 was not found; not stopping any TinyFix process');
     Exit;
   end;
-  AppDir := ExpandConstant('{app}');
+  AppDir := AppDirPath;
   Ps := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   if not FileExists(Ps) then
     Ps := ExpandConstant('{syswow64}\WindowsPowerShell\v1.0\powershell.exe');
@@ -641,7 +655,7 @@ procedure StopTinyFixInApp;
 var
   I, ResultCode: Integer;
 begin
-  Log('Stopping TinyFix.exe only if it is running from ' + ExpandConstant('{app}'));
+  Log('Stopping TinyFix.exe only if it is running from ' + AppDirPath);
   ResultCode := RunTinyFixStopScript(False);
   Log('Targeted TinyFix stop finished with code ' + IntToStr(ResultCode));
   I := 0;

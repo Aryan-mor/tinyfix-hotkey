@@ -52,6 +52,10 @@ for number in range(1, 9):
     alert = root / "assets" / f"tinyfix-alert-{number}.ico"
     if alert.exists():
         datas.append((str(alert), "."))
+for letter in "MFL":
+    result = root / "assets" / f"tinyfix-result-{letter}.ico"
+    if result.exists():
+        datas.append((str(result), "."))
 if icon.exists():
     datas.append((str(icon), "."))
 

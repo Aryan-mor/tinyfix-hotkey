@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets" / "tinyfix.ico"
@@ -50,12 +50,36 @@ def make_working_icon(size: int, active: int) -> Image.Image:
     return image
 
 
+def make_result_icon(size: int, letter: str) -> Image.Image:
+    """The green tile with a big white M (main model), F (fallback model) or L (local)."""
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    pad = max(1, size // 32)
+    radius = max(2, size // 5)
+    draw.rounded_rectangle((pad, pad, size - pad - 1, size - pad - 1), radius=radius, fill=(18, 92, 68, 255))
+    font = None
+    for name in ("arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf"):
+        try:
+            font = ImageFont.truetype(name, int(size * 0.78))
+            break
+        except OSError:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+    draw.text((size / 2, size / 2), letter, font=font, fill=(255, 255, 255, 255), anchor="mm")
+    return image
+
+
 def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     base = make_icon(256)
     base.save(OUT, format="ICO", sizes=SIZES)
     for active, path in enumerate(WORKING_OUT):
         make_working_icon(256, active).save(path, format="ICO", sizes=SIZES)
+        print(f"Wrote {path}")
+    for letter in "MFL":
+        path = ROOT / "assets" / f"tinyfix-result-{letter}.ico"
+        make_result_icon(256, letter).save(path, format="ICO", sizes=SIZES)
         print(f"Wrote {path}")
     print(f"Wrote {OUT}")
     return 0

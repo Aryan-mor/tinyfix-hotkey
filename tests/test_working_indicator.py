@@ -16,7 +16,7 @@ class FakeIcon:
         self.calls = []
         self.fail = fail
 
-    def set_busy(self, flag):
+    def set_busy(self, flag, letter=""):
         if self.fail:
             raise RuntimeError("tray is gone")
         self.calls.append(flag)

@@ -35,7 +35,7 @@ from hotkey_util import (
     disabled_hotkey,
     parse_hotkey,
 )
-from llm_client import DEFAULT_GOOGLE_FALLBACK_MODEL, DEFAULT_OPENROUTER_FALLBACK_MODEL, RETIRED_FALLBACK_MODELS, LLMConfig, LLMError, LLMTimeout, correct_with_fallback, resolve_google_model, resolve_skill_config, run_skill_online, translate_online
+from llm_client import DEFAULT_GOOGLE_FALLBACK_MODEL, DEFAULT_OPENROUTER_FALLBACK_MODEL, RETIRED_FALLBACK_MODELS, LLMConfig, LLMError, LLMTimeout, correct_with_fallback, last_source, reset_source, resolve_google_model, resolve_skill_config, run_skill_online, translate_online
 from prompts import DEFAULT_FIX_PROMPT, LEGACY_FIX_PROMPTS, DEFAULT_TARGET_LANGUAGE, DEFAULT_TRANSLATE_PROMPT
 from secret_store import default_secrets_path, load_api_keys, save_api_keys
 from settings_ui import SettingsData, SettingsHooks, open_settings
@@ -65,7 +65,7 @@ from update_check import (
 
 APP_NAME = "TinyFix"
 GITHUB_URL = "https://github.com/Aryan-mor/tinyfix-hotkey"
-APP_VERSION = "1.5.13"
+APP_VERSION = "1.5.14"
 MUTEX_NAME = "Local\\TinyFixHotkey" + os.environ.get("TINYFIX_MUTEX_SUFFIX", "")  # the suffix is for tests only
 CONFIG_SECTION = "TinyFix"
 HOTKEY_ID = 1
@@ -278,22 +278,24 @@ class WorkLock:
     def acquire(self, blocking: bool = True) -> bool:
         got = self._lock.acquire(blocking)
         if got:
+            reset_source()
             _show_working(True)
         return got
 
     def release(self) -> None:
+        letter = last_source()
         self._lock.release()
-        _show_working(False)
+        _show_working(False, letter)
 
     def locked(self) -> bool:
         return self._lock.locked()
 
 
-def _show_working(working: bool) -> None:
+def _show_working(working: bool, letter: str = "") -> None:
     icon = tray_icon
     if icon is not None:
         try:
-            icon.set_busy(working)
+            icon.set_busy(working, letter)
         except Exception:
             logging.exception("Could not update the tray icon")
 
@@ -2013,6 +2015,18 @@ def working_icon_paths() -> list[Path]:
     return found
 
 
+def result_icon_paths() -> dict[str, Path]:
+    """Tiles with M (main model), F (fallback model) or L (local) shown briefly before the tick returns."""
+    found: dict[str, Path] = {}
+    for letter in ("M", "F", "L"):
+        name = f"tinyfix-result-{letter}.ico"
+        for base in (RESOURCES, ROOT, ROOT / "assets"):
+            if (base / name).exists():
+                found[letter] = base / name
+                break
+    return found
+
+
 def alert_icon_paths() -> list[Path]:
     """The red bouncing "!" frames the tray shows when something fails."""
     found: list[Path] = []
@@ -2067,7 +2081,7 @@ def setup_tray() -> None:
         tray.MenuItem("About TinyFix", open_about_window),
         tray.MenuItem("Exit", lambda *_: request_stop()),
     ]
-    tray_icon = tray.TrayIcon(APP_NAME, icon_path(), tray_title(), menu, working_icon_paths=working_icon_paths(), alert_icon_paths=alert_icon_paths())
+    tray_icon = tray.TrayIcon(APP_NAME, icon_path(), tray_title(), menu, working_icon_paths=working_icon_paths(), alert_icon_paths=alert_icon_paths(), result_icon_paths=result_icon_paths())
 
     def setup(icon: tray.TrayIcon) -> None:
         icon.visible = True
