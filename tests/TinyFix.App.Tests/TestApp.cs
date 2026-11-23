@@ -1,6 +1,7 @@
 // Headless Avalonia with real Skia rendering, so windows can be captured as images, plus the fake OS ports and the
 // service container the tests build against a throw-away data folder (the real %APPDATA% is never touched).
 
+using System.Net;
 using Avalonia;
 using Avalonia.Fonts.Inter;
 using Avalonia.Headless;
@@ -24,12 +25,16 @@ namespace TinyFix.App.Tests;
 public static class TestAppBuilder
 {
     /// <summary>Builds the test application.</summary>
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>()
+    public static AppBuilder BuildAvaloniaApp()
+    {
+        // The real startup must not open the wizard over the throw-away folder (or, worse, the user's data).
+        Environment.SetEnvironmentVariable(TinyFix.App.ViewModels.SetupWizardViewModel.SkipVariable, "1");
+        return AppBuilder.Configure<App>()
             .UseSkia()
             // Slice-label tests measure with this face, not whatever UI font the runner has installed.
             .WithInterFont()
             .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
+    }
 }
 
 /// <summary>Records shortcut registrations instead of installing a global hook.</summary>
@@ -215,6 +220,7 @@ internal static class TestServices
         Ports.Reset();
         Hotkeys.Suspended = false;
         Motion.Set(true);
+        ScriptedHttp.Reset();
         var store = AppHost.Services.Store;
         if (File.Exists(store.SettingsPath))
             File.Delete(store.SettingsPath);
@@ -248,11 +254,40 @@ internal static class TestServices
     }
 }
 
-/// <summary>A handler that refuses every request (tests must never reach the network).</summary>
+/// <summary>A scripted reply for one test. The default is still "no network", so nothing is sent for real.</summary>
+internal static class ScriptedHttp
+{
+    public static HttpStatusCode? Status { get; set; }
+
+    public static string Body { get; set; } = "";
+
+    /// <summary>Wait until the request is cancelled (the wizard's Cancel button).</summary>
+    public static bool Hang { get; set; }
+
+    public static void Reset()
+    {
+        Status = null;
+        Body = "";
+        Hang = false;
+    }
+}
+
+/// <summary>A handler that refuses every request unless a test scripted a reply. Tests must never reach the network.</summary>
 internal sealed class HttpClientHandlerStub : HttpMessageHandler
 {
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (ScriptedHttp.Hang)
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+        if (ScriptedHttp.Status is { } status)
+        {
+            return new HttpResponseMessage(status)
+            {
+                Content = new StringContent(ScriptedHttp.Body, System.Text.Encoding.UTF8, "application/json"),
+            };
+        }
         throw new HttpRequestException("The tests have no network.");
+    }
 }
 
 /// <summary>Discards log lines.</summary>

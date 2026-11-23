@@ -18,7 +18,7 @@ public sealed class TrayService(UserDataStore store, ILocalizer loc)
     private readonly DispatcherTimer _frames = new() { Interval = TimeSpan.FromMilliseconds(220) };
     private readonly DispatcherTimer _resultTimer = new() { Interval = TimeSpan.FromSeconds(1.6) };
     private TrayIcon? _tray;
-    private NativeMenuItem? _settings, _menu, _clipboard, _pause, _quit;
+    private NativeMenuItem? _settings, _setup, _menu, _clipboard, _pause, _quit;
     private int _frame;
 
     /// <summary>Creates the icon and attaches it to <paramref name="app"/>.</summary>
@@ -26,6 +26,8 @@ public sealed class TrayService(UserDataStore store, ILocalizer loc)
     {
         _settings = new NativeMenuItem();
         _settings.Click += (_, _) => AppHost.Services.Windows.ShowSettings();
+        _setup = new NativeMenuItem();
+        _setup.Click += (_, _) => AppHost.Services.Windows.ShowSetup();
         _menu = new NativeMenuItem();
         _menu.Click += (_, _) => _ = AppHost.Services.Donut.OpenAsync();
         _clipboard = new NativeMenuItem();
@@ -38,7 +40,7 @@ public sealed class TrayService(UserDataStore store, ILocalizer loc)
         _tray = new TrayIcon
         {
             ToolTipText = "TinyFix",
-            Menu = new NativeMenu { Items = { _settings, _menu, _clipboard, new NativeMenuItemSeparator(), _pause, new NativeMenuItemSeparator(), _quit } },
+            Menu = new NativeMenu { Items = { _settings, _setup, _menu, _clipboard, new NativeMenuItemSeparator(), _pause, new NativeMenuItemSeparator(), _quit } },
             IsVisible = true,
         };
         _tray.Clicked += (_, _) => AppHost.Services.Windows.ShowSettings();
@@ -65,6 +67,7 @@ public sealed class TrayService(UserDataStore store, ILocalizer loc)
         if (_tray is null)
             return;
         _settings!.Header = loc["tray.settings"];
+        _setup!.Header = loc["tray.setup"];
         _menu!.Header = loc["tray.skill_menu"];
         _clipboard!.Header = loc["tray.fix_clipboard"];
         _pause!.Header = store.Settings.Paused ? loc["tray.resume"] : loc["tray.pause"];

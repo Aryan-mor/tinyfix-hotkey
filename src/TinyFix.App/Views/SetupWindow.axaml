@@ -1,0 +1,251 @@
+<!--
+  First-run setup. One window, four steps, the same soft surfaces as Settings.
+  Skip, the close button, and Finish all mark setup complete. Escape does too, unless a key is half typed.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:input="using:Avalonia.Input"
+        xmlns:automation="using:Avalonia.Automation"
+        xmlns:donut="using:TinyFix.Core.Donut"
+        xmlns:c="using:TinyFix.App.Controls"
+        xmlns:ed="using:TinyFix.App.Views.Controls"
+        xmlns:vm="using:TinyFix.App.ViewModels"
+        x:Class="TinyFix.App.Views.SetupWindow"
+        x:DataType="vm:SetupWizardViewModel"
+        Title="{Binding WindowTitle}"
+        Icon="avares://TinyFix/Assets/Icons/tinyfix.ico"
+        Width="760" Height="600" MinWidth="760" MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        input:KeyboardNavigation.TabNavigation="Cycle"
+        automation:AutomationProperties.Name="{Binding WindowTitle}">
+  <Window.Styles>
+    <Style Selector="Border.stepbar">
+      <Setter Property="Height" Value="4" />
+      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+      <Setter Property="Margin" Value="3,0,3,6" />
+    </Style>
+    <Style Selector="Border.stepbar.current, Border.stepbar.done">
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="TextBlock.step-label">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="TextAlignment" Value="Center" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Margin" Value="2,0" />
+    </Style>
+    <Style Selector="TextBlock.step-label.current">
+      <Setter Property="Foreground" Value="{DynamicResource AccentStrongBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBox:focus-visible, ComboBox:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+  </Window.Styles>
+
+  <DockPanel Margin="28,20,28,18">
+    <Grid DockPanel.Dock="Bottom" Margin="0,14,0,0" ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+      <Button Content="{DynamicResource setup.back}" Command="{Binding BackCommand}" MinWidth="96"
+              automation:AutomationProperties.Name="{DynamicResource setup.back}" />
+      <Button Grid.Column="1" Classes="ghost" HorizontalAlignment="Right" Margin="12,0"
+              Content="{DynamicResource setup.skip}" Command="{Binding SkipCommand}"
+              automation:AutomationProperties.Name="{DynamicResource setup.skip}" />
+      <Button Grid.Column="2" Classes="accent" MinWidth="120" Content="{Binding ContinueLabel}" Command="{Binding ContinueCommand}"
+              automation:AutomationProperties.Name="{Binding ContinueLabel}" />
+    </Grid>
+
+    <StackPanel DockPanel.Dock="Top" Spacing="12" Margin="0,0,0,8">
+      <ItemsControl ItemsSource="{Binding Indicators}" automation:AutomationProperties.Name="{Binding Headline}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <UniformGrid Columns="4" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:SetupStepIndicator">
+            <StackPanel automation:AutomationProperties.Name="{Binding Label}">
+              <Border Classes="stepbar" Classes.current="{Binding IsCurrent}" Classes.done="{Binding IsDone}" />
+              <TextBlock Classes="step-label" Classes.current="{Binding IsCurrent}" Text="{Binding Label}" />
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <StackPanel Spacing="4">
+        <TextBlock Text="{Binding Headline}" Classes="h1" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Subtitle}" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" />
+      </StackPanel>
+    </StackPanel>
+
+    <ScrollViewer x:Name="BodyScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <Grid>
+        <StackPanel x:Name="WelcomeStep" Spacing="16" IsVisible="{Binding IsWelcome}">
+          <c:DonutMenu x:Name="WelcomeDonut" Width="170" Height="170" OuterRadius="64" HoleRatio="0.46"
+                       HorizontalAlignment="Center" IsHitTestVisible="False" Focusable="False"
+                       ShowCaptions="False" DefaultShow="{x:Static donut:LabelShow.IconOnly}"
+                       CenterTitle="" CenterSubtitle="" CenterHint="" CenterNotice="" />
+          <StackPanel Spacing="8">
+            <Grid ColumnDefinitions="20,*" ColumnSpacing="8">
+              <PathIcon Data="{StaticResource Icon.Check}" Width="16" Height="16" VerticalAlignment="Center"
+                        Foreground="{DynamicResource AccentBrush}" />
+              <TextBlock Grid.Column="1" Text="{DynamicResource setup.welcome.benefit_fix}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </Grid>
+            <Grid ColumnDefinitions="20,*" ColumnSpacing="8">
+              <PathIcon Data="{StaticResource Icon.Check}" Width="16" Height="16" VerticalAlignment="Center"
+                        Foreground="{DynamicResource AccentBrush}" />
+              <TextBlock Grid.Column="1" Text="{DynamicResource setup.welcome.benefit_skills}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </Grid>
+            <Grid ColumnDefinitions="20,*" ColumnSpacing="8">
+              <PathIcon Data="{StaticResource Icon.Check}" Width="16" Height="16" VerticalAlignment="Center"
+                        Foreground="{DynamicResource AccentBrush}" />
+              <TextBlock Grid.Column="1" Text="{DynamicResource setup.welcome.benefit_donut}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </Grid>
+          </StackPanel>
+          <StackPanel Spacing="0" MaxWidth="360" HorizontalAlignment="Left">
+            <TextBlock Text="{DynamicResource setup.welcome.language}" Classes="label" />
+            <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedLanguage}" HorizontalAlignment="Stretch"
+                      automation:AutomationProperties.Name="{DynamicResource setup.welcome.language}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:LanguageOption">
+                  <TextBlock Text="{Binding Name}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+        </StackPanel>
+
+        <StackPanel x:Name="ModelStep" Spacing="12" IsVisible="{Binding IsModel}">
+          <ItemsControl ItemsSource="{Binding Providers}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <UniformGrid Columns="2" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.Styles>
+              <Style Selector="ContentPresenter">
+                <Setter Property="Margin" Value="4" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              </Style>
+            </ItemsControl.Styles>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SetupProviderCard">
+                <Button Classes="choice-card" Classes.selected="{Binding IsSelected}" Command="{Binding SelectCommand}"
+                        automation:AutomationProperties.Name="{Binding Title}">
+                  <StackPanel Spacing="4">
+                    <TextBlock Classes="choice-title" Text="{Binding Title}" />
+                    <TextBlock Classes="choice-desc" Text="{Binding Description}" />
+                  </StackPanel>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <StackPanel>
+                <TextBlock Text="{DynamicResource models.model}" Classes="label" />
+                <TextBox Text="{Binding Endpoint.Model}" automation:AutomationProperties.Name="{DynamicResource models.model}" />
+              </StackPanel>
+              <StackPanel IsVisible="{Binding ShowBaseUrl}">
+                <TextBlock Text="{DynamicResource models.base_url}" Classes="label" />
+                <TextBox Text="{Binding Endpoint.BaseUrl}" PlaceholderText="{Binding Endpoint.BaseUrlHint}"
+                         automation:AutomationProperties.Name="{DynamicResource models.base_url}" />
+              </StackPanel>
+              <StackPanel Spacing="8" IsVisible="{Binding ShowKey}">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="{DynamicResource models.api_key}" Classes="label" VerticalAlignment="Center" Margin="0" />
+                  <Button Grid.Column="1" Classes="ghost" Padding="8,0" VerticalAlignment="Center"
+                          Content="{DynamicResource setup.model.get_key}" Command="{Binding OpenKeyPageCommand}"
+                          IsVisible="{Binding ShowGetKey}"
+                          automation:AutomationProperties.Name="{DynamicResource setup.model.get_key}" />
+                </Grid>
+                <ed:ApiKeyField DataContext="{Binding Endpoint}" />
+              </StackPanel>
+              <TextBlock Text="{DynamicResource setup.model.local_note}" Classes="caption" TextWrapping="Wrap"
+                         IsVisible="{Binding !ShowKey}" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="{DynamicResource models.test}" Command="{Binding TestCommand}"
+                        automation:AutomationProperties.Name="{DynamicResource models.test}" />
+                <Button Content="{DynamicResource setup.model.cancel_test}" Command="{Binding CancelTestCommand}"
+                        IsVisible="{Binding Testing}"
+                        automation:AutomationProperties.Name="{DynamicResource setup.model.cancel_test}" />
+              </StackPanel>
+              <TextBlock Text="{Binding TestHeadline}" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding Testing}" />
+              <Border Classes="status" Classes.ok="{Binding TestSucceeded}" Classes.danger="{Binding TestFailed}"
+                      HorizontalAlignment="Left" IsVisible="{Binding HasTestResult}">
+                <TextBlock Text="{Binding TestHeadline}" TextWrapping="Wrap" />
+              </Border>
+              <TextBlock Text="{Binding TestDetail}" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasTestDetail}" />
+              <TextBlock Text="{Binding Validation}" Classes="warning" TextWrapping="Wrap"
+                         IsVisible="{Binding Validation, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              <TextBlock Text="{DynamicResource setup.model.fallback_hint}" Classes="caption" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card" Padding="14,12">
+            <StackPanel Spacing="4">
+              <CheckBox IsChecked="{Binding SetupLater}" Content="{DynamicResource setup.model.later}"
+                        automation:AutomationProperties.Name="{DynamicResource setup.model.later}" />
+              <TextBlock Text="{DynamicResource setup.model.later_help}" Classes="caption" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <StackPanel x:Name="SkillsStep" Spacing="8" IsVisible="{Binding IsSkills}">
+          <ItemsControl ItemsSource="{Binding SkillRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SetupSkillRowViewModel">
+                <Border Classes="card" Margin="0,0,0,8" Padding="14,12">
+                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding Description}" Classes="caption" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding Conflict}" Classes="warning" TextWrapping="Wrap"
+                                 IsVisible="{Binding Conflict, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" VerticalAlignment="Top" Margin="12,0,0,0"
+                                  IsChecked="{Binding Enabled}" IsVisible="{Binding ShowToggle}"
+                                  automation:AutomationProperties.Name="{Binding Name}" />
+                    <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,10,0,0">
+                      <c:ShortcutRecorder Value="{Binding Shortcut}" MinWidth="200" Margin="0,0,8,0"
+                                          automation:AutomationProperties.Name="{Binding ShortcutName}" />
+                      <Button Content="{DynamicResource setup.skills.reset}" Command="{Binding ResetShortcutCommand}"
+                              VerticalAlignment="Center" Margin="0,4,0,0"
+                              automation:AutomationProperties.Name="{Binding ResetName}" />
+                    </WrapPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel x:Name="DoneStep" Spacing="14" IsVisible="{Binding IsDone}">
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <StackPanel Spacing="2">
+                <TextBlock Text="{DynamicResource setup.done.model}" Classes="label" Margin="0" />
+                <TextBlock Text="{Binding ModelSummary}" TextWrapping="Wrap" />
+              </StackPanel>
+              <StackPanel Spacing="2">
+                <TextBlock Text="{DynamicResource setup.done.skills}" Classes="label" Margin="0" />
+                <TextBlock Text="{Binding SkillsSummary}" TextWrapping="Wrap" />
+              </StackPanel>
+              <StackPanel Spacing="2">
+                <TextBlock Text="{DynamicResource setup.done.donut}" Classes="label" Margin="0" />
+                <TextBlock Text="{Binding DonutSummary}" TextWrapping="Wrap" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <ToggleSwitch IsChecked="{Binding Autostart}" Content="{DynamicResource settings.autostart}"
+                        automation:AutomationProperties.Name="{DynamicResource settings.autostart}" />
+          <Button Classes="accent" HorizontalAlignment="Left" Content="{DynamicResource setup.done.try}"
+                  Command="{Binding TryDonutCommand}"
+                  automation:AutomationProperties.Name="{DynamicResource setup.done.try}" />
+          <TextBlock Text="{DynamicResource setup.done.note}" Classes="caption" TextWrapping="Wrap" />
+        </StackPanel>
+      </Grid>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

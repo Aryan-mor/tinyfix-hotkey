@@ -7,10 +7,11 @@ using TinyFix.App.Views;
 
 namespace TinyFix.App.Services;
 
-/// <summary>Opens the Settings window.</summary>
+/// <summary>Opens Settings and the first-run setup window.</summary>
 public sealed class WindowService
 {
     private SettingsWindow? _settings;
+    private SetupWindow? _setup;
 
     /// <summary>Shows Settings (on the UI thread, whichever thread asks), creating it on first use.</summary>
     public void ShowSettings()
@@ -33,4 +34,26 @@ public sealed class WindowService
 
     /// <summary>The open Settings window, or null.</summary>
     public SettingsWindow? Settings => _settings;
+
+    /// <summary>The open setup window, or null.</summary>
+    public SetupWindow? Setup => _setup;
+
+    /// <summary>Shows the setup wizard, or brings it forward when it is already open. Saved settings are left as they are.</summary>
+    public void ShowSetup()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(ShowSetup);
+            return;
+        }
+        if (_setup is null)
+        {
+            _setup = new SetupWindow(new SetupWizardViewModel(AppHost.Services));
+            _setup.Closed += (_, _) => _setup = null;
+        }
+        if (_setup.WindowState == WindowState.Minimized)
+            _setup.WindowState = WindowState.Normal;
+        _setup.Show();
+        _setup.Activate();
+    }
 }

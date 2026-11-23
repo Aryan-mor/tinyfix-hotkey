@@ -2,6 +2,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:automation="using:Avalonia.Automation"
+             xmlns:c="using:TinyFix.App.Views.Controls"
              xmlns:vm="using:TinyFix.App.ViewModels"
              x:Class="TinyFix.App.Views.Controls.EndpointEditor"
              x:DataType="vm:EndpointEditorViewModel">
@@ -31,42 +32,7 @@
       </StackPanel>
       <StackPanel Spacing="8">
         <TextBlock Text="{DynamicResource models.api_key}" Classes="label" />
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowInput}">
-          <TextBox Grid.Column="0" Text="{Binding ApiKey}" PasswordChar="{Binding PasswordChar}" IsTabStop="True" />
-          <Button Grid.Column="1" Margin="8,0,0,0" MinWidth="40" Padding="10,0"
-                  Command="{Binding ToggleRevealCommand}"
-                  automation:AutomationProperties.Name="{Binding RevealName}">
-            <Panel>
-              <PathIcon Data="{StaticResource Icon.Eye}" IsVisible="{Binding ShowEye}" Width="18" Height="18" />
-              <PathIcon Data="{StaticResource Icon.EyeOff}" IsVisible="{Binding ShowEyeOff}" Width="18" Height="18" />
-            </Panel>
-          </Button>
-        </Grid>
-        <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsReplacing}">
-          <Button Content="{DynamicResource models.save}" Command="{Binding SaveReplacementCommand}"
-                  automation:AutomationProperties.Name="{DynamicResource models.save}" />
-          <Button Content="{DynamicResource models.cancel}" Command="{Binding CancelKeyEditCommand}"
-                  automation:AutomationProperties.Name="{DynamicResource models.cancel}" />
-        </StackPanel>
-        <StackPanel Spacing="6" IsVisible="{Binding IsSaved}">
-          <TextBlock Text="{Binding MaskedKey}" IsHitTestVisible="False" Focusable="False" FontFamily="Consolas, Menlo, monospace" />
-          <TextBlock Text="{DynamicResource models.key_saved}" Classes="caption" />
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Content="{DynamicResource models.replace}" Command="{Binding BeginReplaceCommand}"
-                    automation:AutomationProperties.Name="{DynamicResource models.replace}" />
-            <Button Content="{DynamicResource models.remove}" Command="{Binding BeginRemoveCommand}"
-                    automation:AutomationProperties.Name="{DynamicResource models.remove}" />
-          </StackPanel>
-        </StackPanel>
-        <StackPanel Spacing="6" IsVisible="{Binding IsConfirmingRemove}">
-          <TextBlock Text="{DynamicResource models.remove_confirm}" />
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Content="{DynamicResource models.remove}" Command="{Binding ConfirmRemoveCommand}"
-                    automation:AutomationProperties.Name="{DynamicResource models.remove}" />
-            <Button Content="{DynamicResource models.cancel}" Command="{Binding CancelKeyEditCommand}"
-                    automation:AutomationProperties.Name="{DynamicResource models.cancel}" />
-          </StackPanel>
-        </StackPanel>
+        <c:ApiKeyField />
       </StackPanel>
       <StackPanel>
         <TextBlock Text="{DynamicResource models.timeout}" Classes="label" />

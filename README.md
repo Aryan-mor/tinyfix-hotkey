@@ -35,6 +35,10 @@ Download the file for your system from the [latest release](https://github.com/A
 | macOS (Apple silicon or Intel) | `TinyFix-<version>-osx-arm64.dmg` or `-osx-x64.dmg` | Open the image and drag TinyFix to Applications. It is not notarized: the first time, right-click the app and choose Open. Grant the Accessibility permission when asked. |
 | Linux (x64 or arm64) | `TinyFix-<version>-linux-x64.tar.gz` or `-linux-arm64.tar.gz` | Extract it and run `./install.sh` (installs for your user, `./uninstall.sh` removes it). X11 is needed for global shortcuts. |
 
+## First run
+
+The first start opens a short setup window: the language, an AI model (or "Set up later"), which skills are on and their shortcuts, then a summary with the option to start with the system. Closing the window, skipping, or finishing all count as done, and it does not open again. **Settings → About → Run setup again**, or **Setup...** on the tray icon, opens it any time without clearing what you already saved. A skill still needs a model before it can run. Set `TINYFIX_SKIP_SETUP=1` to start without the window.
+
 ## Run from source
 
 With the .NET 10 SDK:

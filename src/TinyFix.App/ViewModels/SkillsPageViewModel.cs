@@ -314,6 +314,23 @@ public sealed partial class SkillsPageViewModel : PageViewModel
         Flush();
     }
 
+    /// <summary>Picks up skill edits the setup wizard made on the same store.</summary>
+    public void RefreshAfterExternalEdit()
+    {
+        foreach (var row in Rows)
+            row.Refresh();
+        if (Selected is not { } selected)
+        {
+            UpdateConflicts();
+            return;
+        }
+        _loading = true;
+        Enabled = selected.Skill.Enabled;
+        Shortcut = selected.Skill.Hotkey;
+        _loading = false;
+        UpdateConflicts();
+    }
+
     /// <summary>Puts the default prompt of the selected skill back.</summary>
     [RelayCommand]
     private void ResetPrompt()

@@ -55,8 +55,14 @@ public partial class App : Application
 
         if (Program.Instance is { } instance)
         {
-            // A second launch means "show me": open Settings.
-            instance.ArgumentsReceived += _ => services.Windows.ShowSettings();
+            // A second launch means "show me". An open setup window is brought forward; otherwise Settings opens.
+            instance.ArgumentsReceived += _ =>
+            {
+                if (services.Windows.Setup is not null)
+                    services.Windows.ShowSetup();
+                else
+                    services.Windows.ShowSettings();
+            };
         }
         desktop.Exit += (_, _) =>
         {
@@ -82,6 +88,10 @@ public partial class App : Application
         var conflicts = ConflictText.Build(services);
         if (conflicts.Length > 0)
             services.Toasts.Show(StatusKind.Failure, "status.conflict", conflicts.Split('\n')[0]);
+
+        // Once the tray is up. TINYFIX_SKIP_SETUP=1 is how smoke tests start without the window.
+        if (SetupWizardViewModel.ShouldOffer(services.Store.Settings, Environment.GetEnvironmentVariable(SetupWizardViewModel.SkipVariable)))
+            services.Windows.ShowSetup();
 
         // A copy started with TINYFIX_DATA_DIR (tests, portable use) never phones home on its own.
         if (DataDirectory.Override is null && services.Store.Settings.CheckForUpdates &&

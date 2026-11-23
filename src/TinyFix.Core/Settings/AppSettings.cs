@@ -44,6 +44,12 @@ public sealed class AppSettings
     /// <summary>Set once "start with the system" got its on-by-default registration (<c>AutostartDefault</c>).</summary>
     public bool AutostartDefaultApplied { get; set; }
 
+    /// <summary>
+    /// False until the first-run setup is finished, skipped, or closed. The window opens once; running it again does not
+    /// clear this or the saved model and skills.
+    /// </summary>
+    public bool SetupCompleted { get; set; }
+
     /// <summary>How the skill donut looks and where it opens. Missing values keep today's behaviour.</summary>
     public DonutSettings Donut { get; set; } = new();
 
