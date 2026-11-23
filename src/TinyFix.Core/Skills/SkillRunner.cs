@@ -1,4 +1,4 @@
-// Runs one skill end to end: capture the selection, send it through the online model, paste the result back.
+// Runs one skill end to end: capture the selection, send it through the configured AI model, paste the result back.
 // Ported from app.py (run_skill, on_fix_clipboard) minus the offline engine. One job at a time; failures leave the
 // user's text unchanged and restore the clipboard.
 
@@ -40,24 +40,39 @@ public sealed class SkillRunner(
 {
     private readonly SemaphoreSlim _busy = new(1, 1);
 
-    /// <summary>The online settings with the saved keys filled in.</summary>
-    public LlmConfig CurrentLlmConfig()
-    {
-        var settings = store.Settings;
-        var keys = secrets.GetAll();
-        string Key(string provider) => keys.TryGetValue(provider, out var k) ? k : "";
-        var fallbackProvider = string.IsNullOrWhiteSpace(settings.LlmFallbackProvider) ? settings.LlmProvider : settings.LlmFallbackProvider;
-        return settings.ToLlmConfig(Key(settings.LlmProvider), Key(fallbackProvider));
-    }
+    /// <summary>The saved endpoints with the saved keys filled in. A skill override is not applied here.</summary>
+    public LlmConfig CurrentLlmConfig() => store.Settings.ToLlmConfig(KeyMap(null));
 
-    /// <summary>True when an online model is switched on and has a key.</summary>
-    public bool AiReady => CurrentLlmConfig().Ready;
+    /// <summary>True when <paramref name="skill"/> has a model that can answer. An override is judged on its own.</summary>
+    public bool IsUsable(Skill skill) => ConfigFor(skill).Ready;
 
     private LlmConfig ConfigFor(Skill skill) =>
-        LlmConfigResolver.ForSkill(CurrentLlmConfig(), skill.ModelMode, skill.ModelChoice(), secrets.GetAll());
+        LlmConfigResolver.ForSkill(CurrentLlmConfig(), skill.ModelMode, skill.ModelChoice(), KeyMap(skill.Id), skill.Id);
+
+    /// <summary>Saved keys plus the slot keys <see cref="ISecretStore.GetAll"/> may not list (per-skill accounts).</summary>
+    private Dictionary<string, string> KeyMap(string? skillId)
+    {
+        var keys = secrets.GetAll().ToDictionary(pair => pair.Key, pair => pair.Value);
+        void Take(string slot)
+        {
+            if (keys.ContainsKey(slot))
+                return;
+            var value = secrets.Get(slot);
+            if (value.Length > 0)
+                keys[slot] = value;
+        }
+        Take(LlmSecrets.MainSlot);
+        Take(LlmSecrets.FallbackSlot);
+        if (skillId is not null)
+        {
+            Take(LlmSecrets.SkillMain(skillId));
+            Take(LlmSecrets.SkillFallback(skillId));
+        }
+        return keys;
+    }
 
     private IFixEngine EngineFor(Skill skill, LlmConfig config) =>
-        new OnlineFixEngine(llm, () => config, skill.Prompt, store.Settings.LlmTargetLanguage);
+        new OnlineFixEngine(llm, () => config, skill.Prompt, store.Settings.Variables);
 
     /// <summary>Runs <paramref name="skill"/> on the text of the window <paramref name="targetWindow"/> (a token from <see cref="IForegroundWindow.Save"/>).</summary>
     public async Task RunAsync(Skill skill, string? targetWindow, CancellationToken ct = default)
@@ -191,7 +206,7 @@ public sealed class SkillRunner(
                 status.Show(StatusKind.Info, "clipboard.empty");
                 return;
             }
-            var outcome = await new OnlineFixEngine(llm, () => config, config.FixPrompt).FixAsync(text, ct).ConfigureAwait(false);
+            var outcome = await new OnlineFixEngine(llm, () => config, config.FixPrompt, store.Settings.Variables).FixAsync(text, ct).ConfigureAwait(false);
             letter = outcome.ModelLetter;
             if (outcome.Text == text || outcome.Text.Length == 0)
             {

@@ -1,7 +1,10 @@
 // Loads and saves settings.json and skills.json, and imports the Python app's files once.
 
+using System.Globalization;
 using System.Text.Json;
 using TinyFix.Core.IO;
+using TinyFix.Core.Llm;
+using TinyFix.Core.Prompts;
 using TinyFix.Core.Skills;
 
 namespace TinyFix.Core.Settings;
@@ -86,7 +89,10 @@ public sealed class UserDataStore
                 AtomicFile.WriteAllBytes(newSecrets, File.ReadAllBytes(oldSecrets));
             var config = Path.Combine(legacy, "config.ini");
             if (File.Exists(config))
+            {
                 ApplyConfigIni(File.ReadAllLines(config), Settings);
+                FinishLegacyEndpoints(Settings);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -113,15 +119,33 @@ public sealed class UserDataStore
             var value = line[(eq + 1)..].Trim();
             switch (key)
             {
-                case "llm_provider" when value.Length > 0: settings.LlmProvider = value; break;
-                case "llm_model" when value.Length > 0: settings.LlmModel = value; break;
-                case "llm_base_url": settings.LlmBaseUrl = value; break;
-                case "llm_fallback_model" when value.Length > 0: settings.LlmFallbackModel = value; break;
-                case "llm_fallback_provider": settings.LlmFallbackProvider = value; break;
-                case "llm_target_language" when value.Length > 0: settings.LlmTargetLanguage = value; break;
-                case "llm_enabled": settings.LlmEnabled = value.Equals("true", StringComparison.OrdinalIgnoreCase); break;
-                case "llm_timeout" when double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var t) && t > 0:
-                    settings.LlmTimeout = t;
+                case "llm_provider" when value.Length > 0:
+                    settings.Llm.Main.Protocol = value;
+                    break;
+                case "llm_model" when value.Length > 0:
+                    settings.Llm.Main.Model = value;
+                    break;
+                case "llm_base_url":
+                    settings.Llm.Main.BaseUrl = value;
+                    break;
+                case "llm_fallback_model" when value.Length > 0:
+                    settings.Llm.Fallback ??= new LlmEndpointSettings();
+                    settings.Llm.Fallback.Model = value;
+                    break;
+                case "llm_fallback_provider":
+                    settings.Llm.Fallback ??= new LlmEndpointSettings();
+                    settings.Llm.Fallback.Protocol = value;
+                    break;
+                case "llm_target_language" when value.Length > 0:
+                    settings.Variables[VariableNames.Language] = value;
+                    break;
+                case "llm_enabled":
+                    // Older files had an on/off switch. A configured model is used; the key is ignored.
+                    break;
+                case "llm_timeout" when double.TryParse(value, CultureInfo.InvariantCulture, out var t) && t > 0:
+                    settings.Llm.Main.Timeout = t;
+                    if (settings.Llm.Fallback is not null)
+                        settings.Llm.Fallback.Timeout = t;
                     break;
             }
         }
@@ -130,19 +154,45 @@ public sealed class UserDataStore
     private static AppSettings ReadSettings(string path)
     {
         var settings = new AppSettings();
+        string? json = null;
         try
         {
             if (File.Exists(path))
-                settings = JsonSerializer.Deserialize(File.ReadAllText(path), SettingsJsonContext.Default.AppSettings) ?? new AppSettings();
+            {
+                json = File.ReadAllText(path);
+                settings = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings) ?? new AppSettings();
+            }
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             // A damaged settings file means defaults, not a crash.
             settings = new AppSettings();
+            json = null;
         }
-        settings.Donut ??= new DonutSettings();
-        settings.Donut.Normalize();
+        if (json is not null)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                SettingsMigration.Apply(settings, doc.RootElement);
+            }
+            catch (JsonException)
+            {
+                // The serializer already accepted the file; a second parse failure just skips legacy keys.
+            }
+        }
+        settings.Normalize();
         return settings;
+    }
+
+    /// <summary>Turns provider ids copied out of config.ini into presets, using the base URL when it tells them apart.</summary>
+    private static void FinishLegacyEndpoints(AppSettings settings)
+    {
+        var main = settings.Llm.Main;
+        main.Protocol = LlmProtocols.MapLegacy(main.Protocol, main.BaseUrl);
+        if (settings.Llm.Fallback is { } fallback)
+            fallback.Protocol = LlmProtocols.MapLegacy(string.IsNullOrWhiteSpace(fallback.Protocol) ? main.Protocol : fallback.Protocol, fallback.BaseUrl);
+        settings.Normalize();
     }
 
     /// <summary>Writes settings.json atomically and raises <see cref="Changed"/>.</summary>

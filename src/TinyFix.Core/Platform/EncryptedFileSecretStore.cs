@@ -34,6 +34,10 @@ public sealed class EncryptedFileSecretStore : ISecretStore
     public string Get(string provider) => GetAll().GetValueOrDefault(provider, "");
 
     /// <inheritdoc />
+    public bool Contains(string account) =>
+        GetAll().TryGetValue(account, out var value) && !string.IsNullOrWhiteSpace(value);
+
+    /// <inheritdoc />
     public void Set(string provider, string apiKey)
     {
         var keys = GetAll().ToDictionary(p => p.Key, p => p.Value);

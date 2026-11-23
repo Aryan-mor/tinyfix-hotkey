@@ -1,0 +1,39 @@
+<!-- Variables: a name and a value per row. Prompts insert them with {{name}}. language cannot be removed. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TinyFix.App.ViewModels"
+             x:Class="TinyFix.App.Views.Pages.VariablesPage"
+             x:DataType="vm:VariablesPageViewModel">
+  <ScrollViewer>
+    <StackPanel Spacing="16" MaxWidth="720" HorizontalAlignment="Left">
+      <StackPanel Spacing="4">
+        <TextBlock Text="{Binding Title}" Classes="h1" />
+        <TextBlock Text="{DynamicResource variables.help}" Classes="caption" TextWrapping="Wrap" />
+      </StackPanel>
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <Grid ColumnDefinitions="*,*,Auto">
+            <TextBlock Grid.Column="0" Text="{DynamicResource variables.name}" Classes="label" />
+            <TextBlock Grid.Column="1" Text="{DynamicResource variables.value}" Classes="label" Margin="8,0,0,0" />
+          </Grid>
+          <ItemsControl ItemsSource="{Binding Rows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:VariableRowViewModel">
+                <StackPanel Spacing="2" Margin="0,0,0,8">
+                  <Grid ColumnDefinitions="*,*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding Name}" IsReadOnly="{Binding IsBuiltIn}" Margin="0,0,8,0" />
+                    <TextBox Grid.Column="1" Text="{Binding Value}" Margin="0,0,8,0" />
+                    <Button Grid.Column="2" Content="{DynamicResource variables.remove}" Command="{Binding RemoveCommand}"
+                            IsVisible="{Binding !IsBuiltIn}" VerticalAlignment="Center" />
+                  </Grid>
+                  <TextBlock Text="{Binding Error}" Classes="warning" IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Button Content="{DynamicResource variables.add}" Command="{Binding AddCommand}" Classes="accent" HorizontalAlignment="Left" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

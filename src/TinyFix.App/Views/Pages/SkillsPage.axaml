@@ -6,6 +6,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:TinyFix.App.ViewModels"
              xmlns:c="using:TinyFix.App.Controls"
+             xmlns:ed="using:TinyFix.App.Views.Controls"
              x:Class="TinyFix.App.Views.Pages.SkillsPage"
              x:DataType="vm:SkillsPageViewModel">
   <DockPanel>
@@ -61,28 +62,14 @@
                 <ComboBoxItem Content="{DynamicResource skills.model_custom}" />
               </ComboBox>
             </StackPanel>
-            <StackPanel Spacing="10" IsVisible="{Binding IsCustomModel}">
-              <StackPanel>
-                <TextBlock Text="{DynamicResource skills.model_provider}" Classes="label" />
-                <ComboBox SelectedIndex="{Binding ProviderIndex}" MinWidth="280">
-                  <ComboBoxItem Content="{DynamicResource online.provider_google}" />
-                  <ComboBoxItem Content="{DynamicResource online.provider_openrouter}" />
-                  <ComboBoxItem Content="{DynamicResource online.provider_openai}" />
-                </ComboBox>
-              </StackPanel>
-              <StackPanel>
-                <TextBlock Text="{DynamicResource skills.model_name}" Classes="label" />
-                <TextBox Text="{Binding ModelName}" />
-              </StackPanel>
-              <StackPanel>
-                <TextBlock Text="{DynamicResource skills.model_fallback}" Classes="label" />
-                <TextBox Text="{Binding FallbackModel}" />
-              </StackPanel>
+            <StackPanel Spacing="14" IsVisible="{Binding IsCustomModel}">
+              <ed:EndpointEditor DataContext="{Binding MainOverride}" />
+              <ed:EndpointEditor DataContext="{Binding FallbackOverride}" />
             </StackPanel>
             <StackPanel>
               <TextBlock Text="{DynamicResource skills.prompt}" Classes="label" />
               <TextBox Text="{Binding Prompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="170" MaxHeight="320" FontFamily="Consolas, Menlo, monospace" />
-              <TextBlock Text="{DynamicResource skills.prompt_hint}" Classes="caption" Margin="0,4,0,0" />
+              <TextBlock Text="{Binding VariableHint}" Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap" />
               <Button Content="{DynamicResource skills.reset_prompt}" Command="{Binding ResetPromptCommand}" Margin="0,8,0,0" />
             </StackPanel>
           </StackPanel>

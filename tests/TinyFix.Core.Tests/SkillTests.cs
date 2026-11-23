@@ -212,9 +212,9 @@ public sealed class SkillTests : IDisposable
     {
         var store = SkillCatalog.DefaultStore();
         store.Skills.Add(SkillCatalog.NewCustomSkill("Summarize"));
-        // Every skill goes through the online model, so none is available while AI is off.
-        Assert.Empty(SkillCatalog.EnabledSkills(store, aiReady: false));
-        var on = SkillCatalog.EnabledSkills(store, aiReady: true).Select(s => s.Name).ToList();
+        // Every skill needs a usable model, so none is available when the caller says none is.
+        Assert.Empty(SkillCatalog.EnabledSkills(store, _ => false));
+        var on = SkillCatalog.EnabledSkills(store, _ => true).Select(s => s.Name).ToList();
         Assert.Contains("Translate", on);
         Assert.Contains("Summarize", on);
         Assert.DoesNotContain("Rewrite", on);
@@ -342,5 +342,64 @@ public sealed class SkillTests : IDisposable
         Assert.Contains("Capitalize the first letter of every sentence", DefaultPrompts.Fix);
         Assert.Contains("Check every word", DefaultPrompts.Fix);
         Assert.EndsWith("Don't use em dashes.\n\n{{content}}\n", DefaultPrompts.Fix);
+    }
+
+    [Fact]
+    public void A_skill_file_without_the_new_endpoint_fields_still_loads()
+    {
+        var store = SkillStoreFile.Parse("""
+            {
+              "version": 1,
+              "skill_menu_hotkey": "Ctrl+Alt+Space",
+              "skills": [
+                {
+                  "id": "fix",
+                  "name": "Fix",
+                  "prompt": "Keep {{content}}",
+                  "hotkey": "F3",
+                  "model_mode": "default",
+                  "extra_field": { "nested": true }
+                }
+              ]
+            }
+            """);
+        var skill = Assert.Single(store.Skills);
+        Assert.Equal("Keep {{content}}", skill.Prompt);
+        Assert.Equal("", skill.ModelBaseUrl);
+        Assert.Equal("", skill.ModelFallbackBaseUrl);
+        Assert.Equal(0, skill.ModelTimeout);
+        Assert.Equal(0, skill.ModelFallbackTimeout);
+        Assert.Equal(ModelModes.Default, skill.ModelMode);
+    }
+
+    [Fact]
+    public void Custom_endpoint_fields_round_trip_and_unknown_fields_do_not_drop_known_ones()
+    {
+        var skill = SkillCatalog.NewCustomSkill("Custom");
+        skill.ModelMode = ModelModes.Custom;
+        skill.ModelProvider = "ollama";
+        skill.Model = "llama3.2";
+        skill.ModelBaseUrl = "http://127.0.0.1:11434/v1";
+        skill.ModelTimeout = 12;
+        skill.ModelFallbackProvider = "anthropic";
+        skill.ModelFallback = "claude-sonnet-4-5";
+        skill.ModelFallbackBaseUrl = "https://api.anthropic.com";
+        skill.ModelFallbackTimeout = 20;
+        var store = new SkillStore { Skills = [skill] };
+        var loaded = SkillStoreFile.Parse(SkillStoreFile.Serialize(store)).Skills[0];
+        Assert.Equal(ModelModes.Custom, loaded.ModelMode);
+        Assert.Equal("ollama", loaded.ModelProvider);
+        Assert.Equal("llama3.2", loaded.Model);
+        Assert.Equal("http://127.0.0.1:11434/v1", loaded.ModelBaseUrl);
+        Assert.Equal(12, loaded.ModelTimeout);
+        Assert.Equal("anthropic", loaded.ModelFallbackProvider);
+        Assert.Equal("claude-sonnet-4-5", loaded.ModelFallback);
+        Assert.Equal("https://api.anthropic.com", loaded.ModelFallbackBaseUrl);
+        Assert.Equal(20, loaded.ModelFallbackTimeout);
+
+        var withUnknown = SkillStoreFile.Serialize(store).Replace("\"model\": \"llama3.2\"", "\"model\": \"llama3.2\", \"future\": 1", StringComparison.Ordinal);
+        var kept = SkillStoreFile.Parse(withUnknown).Skills[0];
+        Assert.Equal("llama3.2", kept.Model);
+        Assert.Equal("http://127.0.0.1:11434/v1", kept.ModelBaseUrl);
     }
 }

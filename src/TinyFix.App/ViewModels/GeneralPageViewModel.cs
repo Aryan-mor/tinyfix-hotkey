@@ -8,8 +8,26 @@ using TinyFix.Core.Skills;
 
 namespace TinyFix.App.ViewModels;
 
-/// <summary>A language choice in the picker.</summary>
-public sealed record LanguageOption(string Code, string Name);
+/// <summary>A language choice in the picker. The instance stays put when the UI language changes, so the combo keeps its selection.</summary>
+public sealed partial class LanguageOption : ObservableObject
+{
+    /// <summary>Creates a choice.</summary>
+    public LanguageOption(string code, string name)
+    {
+        Code = code;
+        _name = name;
+    }
+
+    /// <summary>The code stored in settings (<c>auto</c>, <c>en</c>, ...).</summary>
+    public string Code { get; }
+
+    /// <summary>The name drawn in the combo. Only <c>auto</c> changes with the UI language; the others are native names.</summary>
+    [ObservableProperty]
+    private string _name;
+
+    /// <inheritdoc />
+    public override string ToString() => Name;
+}
 
 /// <summary>View model of the General page.</summary>
 public sealed partial class GeneralPageViewModel : PageViewModel
@@ -22,7 +40,11 @@ public sealed partial class GeneralPageViewModel : PageViewModel
         : base(services.Loc, "nav.general")
     {
         _s = services;
-        RefreshLanguages();
+        // Built once. Replacing these instances (or clearing the list) makes the combo's selection box go blank:
+        // the selected object is no longer in the list, and a value-equal replacement does not notify the binding.
+        Languages.Add(new LanguageOption("auto", _s.Loc["settings.language_auto"]));
+        foreach (var (code, name) in AppLanguages.All)
+            Languages.Add(new LanguageOption(code, name));
         _selectedLanguage = Languages.FirstOrDefault(l => l.Code == _s.Store.Settings.Language) ?? Languages[0];
         _themeIndex = _s.Store.Settings.Theme switch { "light" => 1, "dark" => 2, _ => 0 };
         _autostart = _s.Platform.Autostart.IsEnabled;
@@ -49,24 +71,13 @@ public sealed partial class GeneralPageViewModel : PageViewModel
     /// <summary>A note about the desktop (Wayland), or empty.</summary>
     public string PlatformNotice { get; }
 
-    private void RefreshLanguages()
-    {
-        var keep = SelectedLanguage?.Code;
-        Languages.Clear();
-        Languages.Add(new LanguageOption("auto", _s.Loc["settings.language_auto"]));
-        foreach (var (code, name) in AppLanguages.All)
-            Languages.Add(new LanguageOption(code, name));
-        if (keep is not null)
-            SelectedLanguage = Languages.First(l => l.Code == keep);
-    }
-
     /// <inheritdoc />
     protected override void OnLanguageChanged(object? sender, EventArgs e)
     {
         base.OnLanguageChanged(sender, e);
-        _loading = true;
-        RefreshLanguages();
-        _loading = false;
+        // Update the "Automatic" caption in place. The selected item stays the same object.
+        if (Languages.Count > 0)
+            Languages[0].Name = _s.Loc["settings.language_auto"];
     }
 
     partial void OnSelectedLanguageChanged(LanguageOption value)

@@ -9,13 +9,17 @@ public class EngineTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    private static LlmConfig Config() => new() { ApiKey = "k", Model = "m", FallbackModel = "", Enabled = true };
+    private static LlmConfig Config() => new()
+    {
+        Main = new LlmEndpoint { Protocol = LlmProtocols.Google, ApiKey = "k", Model = "m" },
+    };
 
     [Fact]
     public async Task The_online_engine_renders_the_template_and_reports_the_model_letter()
     {
         var handler = new FakeHandler((_, _) => FakeHandler.Json(FakeHandler.GeminiAnswer("Hallo Freunde")));
-        var engine = new OnlineFixEngine(new LlmClient(new HttpClient(handler)), Config, "Translate into {{language}}: {{content}}", "German");
+        var engine = new OnlineFixEngine(new LlmClient(new HttpClient(handler)), Config, "Translate into {{language}}: {{content}}",
+            new Dictionary<string, string> { ["language"] = "German" });
         var result = await engine.FixAsync("Hello friends", Ct);
         Assert.Equal(("Hallo Freunde", 'M'), (result.Text, result.ModelLetter));
         Assert.Contains("Translate into German: Hello friends", handler.Requests[0].Body);
@@ -25,7 +29,7 @@ public class EngineTests
     public async Task The_online_engine_refuses_when_ai_is_off_and_never_sends_anything()
     {
         var handler = new FakeHandler((_, _) => FakeHandler.Json("{}"));
-        var engine = new OnlineFixEngine(new LlmClient(new HttpClient(handler)), () => Config() with { Enabled = false }, "{{content}}");
+        var engine = new OnlineFixEngine(new LlmClient(new HttpClient(handler)), () => Config() with { Main = Config().Main with { Model = "" } }, "{{content}}");
         await Assert.ThrowsAsync<LlmException>(() => engine.FixAsync("text", Ct));
         Assert.Empty(handler.Requests);
     }
@@ -36,7 +40,11 @@ public class EngineTests
         var handler = new FakeHandler((req, _) => req.RequestUri!.AbsolutePath.Contains("main", StringComparison.Ordinal)
             ? FakeHandler.Json("{}", System.Net.HttpStatusCode.ServiceUnavailable)
             : FakeHandler.Json(FakeHandler.GeminiAnswer("fixed")));
-        var config = Config() with { Model = "main", FallbackModel = "backup" };
+        var config = Config() with
+        {
+            Main = Config().Main with { Model = "main" },
+            Fallback = new LlmEndpoint { Protocol = LlmProtocols.Google, ApiKey = "k", Model = "backup" },
+        };
         var result = await new OnlineFixEngine(new LlmClient(new HttpClient(handler)), () => config, "{{content}}").FixAsync("x", Ct);
         Assert.Equal(("fixed", 'F'), (result.Text, result.ModelLetter));
     }

@@ -23,6 +23,9 @@ public sealed class SecretToolStore : ISecretStore
         ExternalProcess.Run("secret-tool", ["lookup", "service", Service, "account", "__probe__"]).ExitCode is 0 or 1;
 
     /// <inheritdoc />
+    public bool Contains(string account) => Get(account).Length > 0;
+
+    /// <inheritdoc />
     public string Get(string provider)
     {
         var result = ExternalProcess.Run("secret-tool", ["lookup", "service", Service, "account", provider]);
@@ -44,8 +47,17 @@ public sealed class SecretToolStore : ISecretStore
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, string> GetAll() =>
-        LlmDefaults.Providers.Select(p => (Provider: p, Key: Get(p))).Where(t => t.Key.Length > 0).ToDictionary(t => t.Provider, t => t.Key);
+    public IReadOnlyDictionary<string, string> GetAll()
+    {
+        var result = new Dictionary<string, string>();
+        foreach (var account in LlmSecrets.Accounts)
+        {
+            var key = Get(account);
+            if (key.Length > 0)
+                result[account] = key;
+        }
+        return result;
+    }
 }
 
 /// <summary>Chooses the secret backend of a Linux session.</summary>

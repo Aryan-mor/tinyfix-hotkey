@@ -78,7 +78,19 @@ public sealed class Skill
     public string ModelFallbackProvider { get; set; } = "";
     public string ModelFallback { get; set; } = "";
 
-    /// <summary>True when the skill cannot run without an online model: every skill needs one.</summary>
+    /// <summary>Base URL of a custom main endpoint. Empty keeps the preset or the global URL. Older files omit it.</summary>
+    public string ModelBaseUrl { get; set; } = "";
+
+    /// <summary>Base URL of a custom fallback endpoint. Empty keeps the preset or the global URL.</summary>
+    public string ModelFallbackBaseUrl { get; set; } = "";
+
+    /// <summary>Timeout of a custom main endpoint, in seconds. Zero keeps the global timeout.</summary>
+    public double ModelTimeout { get; set; }
+
+    /// <summary>Timeout of a custom fallback endpoint, in seconds. Zero keeps the global timeout.</summary>
+    public double ModelFallbackTimeout { get; set; }
+
+    /// <summary>True when the skill cannot run without a configured AI model: every skill needs one.</summary>
     public bool NeedsAi => true;
 
     /// <summary>True when the whole field is selected first.</summary>
@@ -94,8 +106,9 @@ public sealed class Skill
         return key.IsDisabled ? "None" : key.Display;
     }
 
-    /// <summary>The skill's own model choice.</summary>
-    public SkillModelChoice ModelChoice() => new(ModelProvider, Model, ModelFallbackProvider, ModelFallback);
+    /// <summary>The skill's own model choice. Empty fields mean the global endpoint.</summary>
+    public SkillModelChoice ModelChoice() =>
+        new(ModelProvider, Model, ModelFallbackProvider, ModelFallback, ModelBaseUrl, ModelFallbackBaseUrl, ModelTimeout, ModelFallbackTimeout);
 
     /// <summary>Repairs every field the way the Python constructor does.</summary>
     public Skill Normalize()
@@ -105,6 +118,12 @@ public sealed class Skill
         Model = (Model ?? "").Trim();
         ModelFallbackProvider = (ModelFallbackProvider ?? "").Trim();
         ModelFallback = (ModelFallback ?? "").Trim();
+        ModelBaseUrl = (ModelBaseUrl ?? "").Trim();
+        ModelFallbackBaseUrl = (ModelFallbackBaseUrl ?? "").Trim();
+        if (!double.IsFinite(ModelTimeout) || ModelTimeout < 0)
+            ModelTimeout = 0;
+        if (!double.IsFinite(ModelFallbackTimeout) || ModelFallbackTimeout < 0)
+            ModelFallbackTimeout = 0;
         Id = string.IsNullOrWhiteSpace(Id) ? Guid.NewGuid().ToString() : Id.Trim();
         Name = string.IsNullOrWhiteSpace(Name) ? "New skill" : Name.Trim();
         InputMode = InputModes.Normalize(InputMode);

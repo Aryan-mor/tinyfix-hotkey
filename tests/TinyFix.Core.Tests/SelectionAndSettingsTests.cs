@@ -85,11 +85,29 @@ internal sealed class FakeSecrets : ISecretStore
 
     public string Description => "fake";
     public string? Warning => null;
-    public string Get(string provider) => Keys.GetValueOrDefault(provider, "");
+    public int Reads { get; private set; }
 
-    public void Set(string provider, string apiKey) => Keys[provider] = apiKey;
+    public string Get(string provider)
+    {
+        Reads++;
+        return Keys.GetValueOrDefault(provider, "");
+    }
 
-    public IReadOnlyDictionary<string, string> GetAll() => Keys;
+    public bool Contains(string account) => Keys.TryGetValue(account, out var value) && !string.IsNullOrWhiteSpace(value);
+
+    public void Set(string provider, string apiKey)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+            Keys.Remove(provider);
+        else
+            Keys[provider] = apiKey;
+    }
+
+    public IReadOnlyDictionary<string, string> GetAll()
+    {
+        Reads++;
+        return Keys;
+    }
 }
 
 internal sealed class RecordingStatus : IStatusSink
@@ -147,10 +165,9 @@ public sealed class SelectionAndSettingsTests : IDisposable
         Assert.Equal("original clipboard", fake.Text);
     }
 
-    /// <summary>A runner whose online model answers <paramref name="answer"/> (AI switched on with a saved key).</summary>
+    /// <summary>A runner whose model answers <paramref name="answer"/> (a saved key makes the default endpoint usable).</summary>
     private SkillRunner OnlineRunner(FakeClipboard fake, RecordingStatus status, UserDataStore store, string answer)
     {
-        store.Settings.LlmEnabled = true;
         var secrets = new FakeSecrets();
         secrets.Set(LlmDefaults.ProviderGoogle, "key");
         return Runner(fake, secrets, status, store, new FakeHandler((_, _) => FakeHandler.Json(FakeHandler.GeminiAnswer(answer))));
@@ -201,7 +218,6 @@ public sealed class SelectionAndSettingsTests : IDisposable
     public async Task An_online_skill_runs_and_a_failure_leaves_the_text_alone()
     {
         var store = NewStore();
-        store.Settings.LlmEnabled = true;
         var secrets = new FakeSecrets();
         secrets.Set(LlmDefaults.ProviderGoogle, "key");
         var fake = new FakeClipboard { Selection = "Hello" };
@@ -217,6 +233,39 @@ public sealed class SelectionAndSettingsTests : IDisposable
         Assert.Null(failing.PastedOver);
         Assert.Equal("original clipboard", failing.Text);
         Assert.Contains("status.failed", failStatus.Keys);
+    }
+
+    [Fact]
+    public async Task A_skill_with_its_own_model_runs_without_a_global_key()
+    {
+        var store = NewStore();
+        var skill = store.Skills.Get(SkillIds.Fix)!;
+        skill.ModelMode = ModelModes.Custom;
+        skill.ModelProvider = LlmProtocols.Ollama;
+        skill.Model = "llama3.2";
+        var fake = new FakeClipboard { Selection = "Hi frinds" };
+        var status = new RecordingStatus();
+        var handler = new FakeHandler((_, _) => FakeHandler.Json(FakeHandler.ChatAnswer("Hi friends")));
+        await Runner(fake, new FakeSecrets(), status, store, handler).RunAsync(skill, null, Ct);
+        Assert.Equal("Hi friends", fake.PastedOver);
+        Assert.DoesNotContain("status.ai_off", status.Keys);
+    }
+
+    [Fact]
+    public async Task A_skill_override_that_needs_a_key_does_not_use_the_global_model()
+    {
+        var store = NewStore();
+        var skill = store.Skills.Get(SkillIds.Translate)!;
+        skill.ModelMode = ModelModes.Custom;
+        skill.ModelProvider = LlmProtocols.OpenRouter;
+        skill.Model = "vendor/model";
+        var secrets = new FakeSecrets();
+        secrets.Set(LlmDefaults.ProviderGoogle, "key");
+        var fake = new FakeClipboard { Selection = "Hello" };
+        var status = new RecordingStatus();
+        await Runner(fake, secrets, status, store).RunAsync(skill, null, Ct);
+        Assert.Equal(["status.ai_off"], status.Keys);
+        Assert.Null(fake.PastedOver);
     }
 
     [Fact]
@@ -259,15 +308,20 @@ public sealed class SelectionAndSettingsTests : IDisposable
         var store = NewStore();
         Assert.True(File.Exists(store.SettingsPath));
         Assert.True(File.Exists(store.SkillsPath));
-        Assert.Equal("English", store.Settings.LlmTargetLanguage);
-        store.Settings.LlmTargetLanguage = "German";
-        store.Settings.LlmModel = "custom-model";
+        Assert.Equal("English", store.Settings.Variables["language"]);
+        store.Settings.Variables["language"] = "German";
+        store.Settings.Variables["tone"] = "formal";
+        store.Settings.Llm.Main.Model = "custom-model";
         store.SaveSettings();
         var again = new UserDataStore(_dir) { LegacySource = () => null };
         again.Load();
-        Assert.Equal("German", again.Settings.LlmTargetLanguage);
-        Assert.Equal("custom-model", again.Settings.LlmModel);
-        Assert.Contains("\"llm_model\"", File.ReadAllText(again.SettingsPath));
+        Assert.Equal("German", again.Settings.Variables["language"]);
+        Assert.Equal("formal", again.Settings.Variables["tone"]);
+        Assert.Equal("custom-model", again.Settings.Llm.Main.Model);
+        var saved = File.ReadAllText(again.SettingsPath);
+        Assert.Contains("\"variables\"", saved);
+        Assert.DoesNotContain("llm_target_language", saved);
+        Assert.DoesNotContain("llm_model", saved);
         Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
     }
 
@@ -350,9 +404,9 @@ public sealed class SelectionAndSettingsTests : IDisposable
         var store = new UserDataStore(data) { LegacySource = () => legacy };
         store.Load();
         Assert.Equal("F7", store.Skills.Get(SkillIds.Fix)!.Hotkey);
-        Assert.True(store.Settings.LlmEnabled);
-        Assert.Equal("openrouter", store.Settings.LlmProvider);
-        Assert.Equal(7.5, store.Settings.LlmTimeout);
+        Assert.Equal("openrouter", store.Settings.Llm.Main.Protocol);
+        Assert.Equal("x/y", store.Settings.Llm.Main.Model);
+        Assert.Equal(7.5, store.Settings.Llm.Main.Timeout);
         Assert.True(File.Exists(Path.Combine(data, "secrets.dpapi")));
         Assert.True(store.Settings.LegacyImported);
 

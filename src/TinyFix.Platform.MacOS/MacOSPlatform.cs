@@ -160,6 +160,9 @@ public sealed class KeychainSecretStore : ISecretStore
     public string? Warning => null;
 
     /// <inheritdoc />
+    public bool Contains(string account) => Get(account).Length > 0;
+
+    /// <inheritdoc />
     public string Get(string provider)
     {
         var result = ExternalProcess.Run("security", ["find-generic-password", "-a", provider, "-s", Service, "-w"]);
@@ -183,8 +186,17 @@ public sealed class KeychainSecretStore : ISecretStore
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, string> GetAll() =>
-        LlmDefaults.Providers.Select(p => (Provider: p, Key: Get(p))).Where(t => t.Key.Length > 0).ToDictionary(t => t.Provider, t => t.Key);
+    public IReadOnlyDictionary<string, string> GetAll()
+    {
+        var result = new Dictionary<string, string>();
+        foreach (var account in LlmSecrets.Accounts)
+        {
+            var key = Get(account);
+            if (key.Length > 0)
+                result[account] = key;
+        }
+        return result;
+    }
 }
 
 /// <summary><see cref="IAutostart"/> over a LaunchAgent plist.</summary>

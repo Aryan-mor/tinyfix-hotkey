@@ -62,7 +62,7 @@ public sealed class RadialController(UserDataStore store, ILocalizer loc, SkillR
             // So the held shortcut keys cannot be read as a key press that dismisses the donut.
             await fg.WaitForModifiersReleasedAsync(TimeSpan.FromMilliseconds(750), ct).ConfigureAwait(false);
             var at = DonutOpenAt.Point(platform.Caret, store.Settings.Donut.OpenAt);
-            var choice = await Dispatcher.UIThread.InvokeAsync(() => ShowAsync(skills, at, runner.AiReady)).ConfigureAwait(false);
+            var choice = await Dispatcher.UIThread.InvokeAsync(() => ShowAsync(skills, at, runner.IsUsable)).ConfigureAwait(false);
             if (choice is { } index)
             {
                 // Restoring happens inside RunAsync, right before the keys are sent.
@@ -96,7 +96,7 @@ public sealed class RadialController(UserDataStore store, ILocalizer loc, SkillR
                 AppHost.Services.Toasts.Show(StatusKind.Info, "donut.none");
                 return;
             }
-            await Dispatcher.UIThread.InvokeAsync(() => ShowAsync(skills, at, runner.AiReady)).ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(() => ShowAsync(skills, at, runner.IsUsable)).ConfigureAwait(false);
         }
         finally
         {
@@ -105,9 +105,9 @@ public sealed class RadialController(UserDataStore store, ILocalizer loc, SkillR
     }
 
     /// <summary>Shows the donut (UI thread) and completes with the chosen skill index, or null.</summary>
-    internal async Task<int?> ShowAsync(IReadOnlyList<Skill> skills, ScreenPoint at, bool aiReady)
+    internal async Task<int?> ShowAsync(IReadOnlyList<Skill> skills, ScreenPoint at, Func<Skill, bool> usable)
     {
-        var vm = new DonutViewModel(skills, loc, aiReady, DonutLook.From(store.Settings.Donut));
+        var vm = new DonutViewModel(skills, loc, usable, DonutLook.From(store.Settings.Donut));
         var window = EnsureWindow();
         var done = new TaskCompletionSource<int?>(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnCompleted(int? result) => done.TrySetResult(result);

@@ -118,11 +118,31 @@ internal sealed class FakePorts : IClipboardAccess, IKeySender, IForegroundWindo
 
     public string Description => "fake store";
     public string? Warning => null;
-    public string Get(string provider) => Keys.GetValueOrDefault(provider, "");
+    public int SecretReads { get; private set; }
 
-    public void Set(string provider, string apiKey) => Keys[provider] = apiKey;
+    public void ResetSecretReads() => SecretReads = 0;
 
-    public IReadOnlyDictionary<string, string> GetAll() => Keys;
+    public string Get(string provider)
+    {
+        SecretReads++;
+        return Keys.GetValueOrDefault(provider, "");
+    }
+
+    public bool Contains(string account) => Keys.TryGetValue(account, out var value) && !string.IsNullOrWhiteSpace(value);
+
+    public void Set(string provider, string apiKey)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+            Keys.Remove(provider);
+        else
+            Keys[provider] = apiKey;
+    }
+
+    public IReadOnlyDictionary<string, string> GetAll()
+    {
+        SecretReads++;
+        return Keys;
+    }
 
     public bool IsEnabled => AutostartOn;
 

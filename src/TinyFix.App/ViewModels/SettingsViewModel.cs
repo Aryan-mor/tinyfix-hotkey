@@ -86,6 +86,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             new GeneralPageViewModel(services),
             new DonutPageViewModel(services),
             new SkillsPageViewModel(services),
+            new VariablesPageViewModel(services),
             new OnlinePageViewModel(services),
             new UpdatesPageViewModel(services),
             new AboutPageViewModel(services),
@@ -93,9 +94,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         Pages[0].UseIcon("Icon.Settings");
         Pages[1].UseIcon("Icon.Donut");
         Pages[2].UseIcon("Icon.Tune");
-        Pages[3].UseIcon("Icon.Link");
-        Pages[4].UseIcon("Icon.Refresh");
-        Pages[5].UseIcon("Icon.Info");
+        Pages[3].UseIcon("Icon.Braces");
+        Pages[4].UseIcon("Icon.Link");
+        Pages[5].UseIcon("Icon.Refresh");
+        Pages[6].UseIcon("Icon.Info");
         _selected = Pages[2];
         Title = _loc["settings.title"];
         VersionText = _loc.Format("about.version", AboutPageViewModel.CurrentVersion);

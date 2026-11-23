@@ -11,7 +11,7 @@
         <StackPanel Spacing="14">
           <StackPanel>
             <TextBlock Text="{DynamicResource settings.language}" Classes="label" />
-            <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedLanguage}" MinWidth="260">
+            <ComboBox x:Name="LanguageBox" ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedLanguage}" MinWidth="260">
               <ComboBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:LanguageOption">
                   <TextBlock Text="{Binding Name}" />
@@ -21,7 +21,7 @@
           </StackPanel>
           <StackPanel>
             <TextBlock Text="{DynamicResource settings.theme}" Classes="label" />
-            <ComboBox SelectedIndex="{Binding ThemeIndex}" MinWidth="260">
+            <ComboBox x:Name="ThemeBox" SelectedIndex="{Binding ThemeIndex}" MinWidth="260">
               <ComboBoxItem Content="{DynamicResource settings.theme_system}" />
               <ComboBoxItem Content="{DynamicResource settings.theme_light}" />
               <ComboBoxItem Content="{DynamicResource settings.theme_dark}" />

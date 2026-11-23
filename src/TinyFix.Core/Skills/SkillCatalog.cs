@@ -195,9 +195,9 @@ public static class SkillCatalog
         return conflicts;
     }
 
-    /// <summary>Enabled skills; those that need AI are left out while no online model is ready.</summary>
-    public static List<Skill> EnabledSkills(SkillStore store, bool aiReady = true) =>
-        store.Skills.Where(s => s.Enabled && (!s.NeedsAi || aiReady)).ToList();
+    /// <summary>Enabled skills whose model <paramref name="isUsable"/> accepts. A skill that needs a model is left out when its own model is not usable.</summary>
+    public static List<Skill> EnabledSkills(SkillStore store, Func<Skill, bool> isUsable) =>
+        store.Skills.Where(s => s.Enabled && (!s.NeedsAi || isUsable(s))).ToList();
 
     /// <summary>The skills the selector lists: every enabled one (AI ones are shown greyed when AI is off).</summary>
     public static List<Skill> VisibleMenuSkills(SkillStore store) => store.Skills.Where(s => s.Enabled).ToList();

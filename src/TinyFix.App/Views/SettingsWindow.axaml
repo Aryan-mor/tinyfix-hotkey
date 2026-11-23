@@ -52,6 +52,7 @@
           <DataTemplate DataType="vm:GeneralPageViewModel"><pages:GeneralPage /></DataTemplate>
           <DataTemplate DataType="vm:DonutPageViewModel"><pages:DonutPage /></DataTemplate>
           <DataTemplate DataType="vm:SkillsPageViewModel"><pages:SkillsPage /></DataTemplate>
+          <DataTemplate DataType="vm:VariablesPageViewModel"><pages:VariablesPage /></DataTemplate>
           <DataTemplate DataType="vm:OnlinePageViewModel"><pages:OnlinePage /></DataTemplate>
           <DataTemplate DataType="vm:UpdatesPageViewModel"><pages:UpdatesPage /></DataTemplate>
           <DataTemplate DataType="vm:AboutPageViewModel"><pages:AboutPage /></DataTemplate>

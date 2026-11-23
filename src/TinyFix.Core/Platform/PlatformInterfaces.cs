@@ -111,8 +111,11 @@ public interface ISecretStore
     /// <summary>Non-null when keys are kept less safely than usual (an encrypted file on Linux without a keyring).</summary>
     string? Warning { get; }
 
-    /// <summary>The saved key of a provider, or an empty string.</summary>
+    /// <summary>The saved key of a provider, or an empty string. Callers that only need to know whether a key exists use <see cref="Contains"/>.</summary>
     string Get(string provider);
+
+    /// <summary>True when a non-empty key is stored for <paramref name="account"/>. The key itself is not returned.</summary>
+    bool Contains(string account);
 
     /// <summary>Saves a key (an empty value deletes it).</summary>
     void Set(string provider, string apiKey);

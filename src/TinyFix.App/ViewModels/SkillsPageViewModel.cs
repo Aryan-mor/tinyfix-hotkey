@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using TinyFix.App.Services;
 using TinyFix.Core.Llm;
 using TinyFix.Core.Prompts;
+using TinyFix.Core.Settings;
 using TinyFix.Core.Skills;
 
 namespace TinyFix.App.ViewModels;
@@ -52,7 +53,6 @@ public sealed partial class SkillRowViewModel(Skill skill, AppServices services)
 public sealed partial class SkillsPageViewModel : PageViewModel
 {
     private static readonly string[] ModelModeIds = [ModelModes.Default, ModelModes.Better, ModelModes.Custom];
-    private static readonly string[] ProviderIds = [.. LlmDefaults.Providers];
 
     private readonly AppServices _s;
     private readonly DispatcherTimer _save = new() { Interval = TimeSpan.FromMilliseconds(500) };
@@ -63,12 +63,37 @@ public sealed partial class SkillsPageViewModel : PageViewModel
         : base(services.Loc, "nav.skills")
     {
         _s = services;
+        MainOverride = new EndpointEditorViewModel(services, LlmSecrets.MainSlot, "skills.override_main", "skills.override_use", allowSkip: true);
+        FallbackOverride = new EndpointEditorViewModel(services, LlmSecrets.FallbackSlot, "skills.override_fallback", "skills.override_use", allowSkip: true);
+        MainOverride.Changed += (_, _) => ApplyEndpoints();
+        FallbackOverride.Changed += (_, _) => ApplyEndpoints();
         foreach (var skill in _s.Store.Skills.Skills)
             Rows.Add(new SkillRowViewModel(skill, _s));
         _save.Tick += (_, _) => Flush();
+        _s.Store.Changed += OnStoreChanged;
         Selected = Rows.FirstOrDefault();
         UpdateConflicts();
         Track();
+    }
+
+    /// <summary>The skill's own main endpoint, used when the model mode is custom.</summary>
+    public EndpointEditorViewModel MainOverride { get; }
+
+    /// <summary>The skill's own fallback endpoint, used when the model mode is custom.</summary>
+    public EndpointEditorViewModel FallbackOverride { get; }
+
+    /// <summary>The variables a prompt can insert, including <c>{{content}}</c>.</summary>
+    public string VariableHint
+    {
+        get
+        {
+            var names = new List<string> { "{{" + VariableNames.Content + "}}" };
+            foreach (var key in _s.Store.Settings.Variables.Keys
+                         .OrderBy(name => name == VariableNames.Language ? 0 : 1)
+                         .ThenBy(name => name, StringComparer.Ordinal))
+                names.Add("{{" + key + "}}");
+            return _s.Loc.Format("skills.prompt_vars", string.Join(", ", names));
+        }
     }
 
     /// <summary>The skills in menu order.</summary>
@@ -96,19 +121,10 @@ public sealed partial class SkillsPageViewModel : PageViewModel
     [ObservableProperty]
     private string _shortcut = "none";
 
-    /// <summary>0 online AI settings, 1 stronger model, 2 custom.</summary>
+    /// <summary>0 the models from Settings, 1 a stronger model, 2 this skill's own endpoints.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCustomModel))]
     private int _modelModeIndex;
-
-    [ObservableProperty]
-    private int _providerIndex;
-
-    [ObservableProperty]
-    private string _modelName = "";
-
-    [ObservableProperty]
-    private string _fallbackModel = "";
 
     [ObservableProperty]
     private string _prompt = "";
@@ -133,9 +149,24 @@ public sealed partial class SkillsPageViewModel : PageViewModel
             InputIndex = skill.SelectAll ? 1 : 0;
             Shortcut = skill.Hotkey;
             ModelModeIndex = Math.Max(0, Array.IndexOf(ModelModeIds, skill.ModelMode));
-            ProviderIndex = Math.Max(0, Array.IndexOf(ProviderIds, string.IsNullOrEmpty(skill.ModelProvider) ? _s.Store.Settings.LlmProvider : skill.ModelProvider));
-            ModelName = skill.Model;
-            FallbackModel = skill.ModelFallback;
+            var mainSlot = LlmSecrets.SkillMain(skill.Id);
+            var fallbackSlot = LlmSecrets.SkillFallback(skill.Id);
+            MainOverride.Slot = mainSlot;
+            FallbackOverride.Slot = fallbackSlot;
+            MainOverride.Load(new LlmEndpointSettings
+            {
+                Protocol = string.IsNullOrEmpty(skill.ModelProvider) ? _s.Store.Settings.Llm.Main.Protocol : skill.ModelProvider,
+                Model = skill.Model,
+                BaseUrl = skill.ModelBaseUrl,
+                Timeout = skill.ModelTimeout,
+            }, use: HasEndpoint(skill.ModelProvider, skill.Model, skill.ModelBaseUrl));
+            FallbackOverride.Load(new LlmEndpointSettings
+            {
+                Protocol = string.IsNullOrEmpty(skill.ModelFallbackProvider) ? _s.Store.Settings.Llm.Main.Protocol : skill.ModelFallbackProvider,
+                Model = skill.ModelFallback,
+                BaseUrl = skill.ModelFallbackBaseUrl,
+                Timeout = skill.ModelFallbackTimeout,
+            }, use: HasEndpoint(skill.ModelFallbackProvider, skill.ModelFallback, skill.ModelFallbackBaseUrl));
             Prompt = skill.Prompt;
         }
         _loading = false;
@@ -156,13 +187,47 @@ public sealed partial class SkillsPageViewModel : PageViewModel
 
     partial void OnModelModeIndexChanged(int value) => Edit(skill => skill.ModelMode = ModelModeIds[Math.Clamp(value, 0, 2)]);
 
-    partial void OnProviderIndexChanged(int value) => Edit(skill => skill.ModelProvider = ProviderIds[Math.Clamp(value, 0, ProviderIds.Length - 1)]);
-
-    partial void OnModelNameChanged(string value) => Edit(skill => skill.Model = value);
-
-    partial void OnFallbackModelChanged(string value) => Edit(skill => skill.ModelFallback = value);
-
     partial void OnPromptChanged(string value) => Edit(skill => skill.Prompt = value);
+
+    private static bool HasEndpoint(string provider, string model, string baseUrl) =>
+        !string.IsNullOrWhiteSpace(provider) || !string.IsNullOrWhiteSpace(model) || !string.IsNullOrWhiteSpace(baseUrl);
+
+    private void ApplyEndpoints()
+    {
+        Edit(skill =>
+        {
+            if (MainOverride.UseThis)
+            {
+                var main = MainOverride.ToSettings();
+                skill.ModelProvider = main.Protocol;
+                skill.Model = main.Model;
+                skill.ModelBaseUrl = main.BaseUrl;
+                skill.ModelTimeout = main.Timeout;
+            }
+            else
+            {
+                skill.ModelProvider = "";
+                skill.Model = "";
+                skill.ModelBaseUrl = "";
+                skill.ModelTimeout = 0;
+            }
+            if (FallbackOverride.UseThis)
+            {
+                var fallback = FallbackOverride.ToSettings();
+                skill.ModelFallbackProvider = fallback.Protocol;
+                skill.ModelFallback = fallback.Model;
+                skill.ModelFallbackBaseUrl = fallback.BaseUrl;
+                skill.ModelFallbackTimeout = fallback.Timeout;
+            }
+            else
+            {
+                skill.ModelFallbackProvider = "";
+                skill.ModelFallback = "";
+                skill.ModelFallbackBaseUrl = "";
+                skill.ModelFallbackTimeout = 0;
+            }
+        });
+    }
 
     private void Edit(Action<Skill> change)
     {
@@ -181,6 +246,11 @@ public sealed partial class SkillsPageViewModel : PageViewModel
     public void Flush()
     {
         _save.Stop();
+        // The key waits until the user pauses, then goes to the skill's own slot (never into skills.json).
+        if (MainOverride.UseThis)
+            MainOverride.RememberNewKey();
+        if (FallbackOverride.UseThis)
+            FallbackOverride.RememberNewKey();
         _s.Store.SaveSkills();
         AppHost.ApplyHotkeys();
     }
@@ -259,13 +329,25 @@ public sealed partial class SkillsPageViewModel : PageViewModel
         foreach (var row in Rows)
             row.Refresh();
         UpdateConflicts();
+        OnPropertyChanged(nameof(VariableHint));
+    }
+
+    private void OnStoreChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            OnPropertyChanged(nameof(VariableHint));
+        else
+            Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(VariableHint)));
     }
 
     /// <inheritdoc />
     public override void Dispose()
     {
+        _s.Store.Changed -= OnStoreChanged;
         if (_save.IsEnabled)
             Flush();
+        MainOverride.Dispose();
+        FallbackOverride.Dispose();
         base.Dispose();
     }
 }

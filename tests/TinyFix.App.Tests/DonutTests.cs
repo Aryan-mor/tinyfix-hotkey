@@ -26,7 +26,7 @@ public class DonutTests
     public void Slices_are_numbered_from_one_and_carry_names_and_shortcuts()
     {
         var s = TestServices.EnsureInitialized("en");
-        var vm = new DonutViewModel(DefaultEnabled(), s.Loc, aiReady: true);
+        var vm = new DonutViewModel(DefaultEnabled(), s.Loc, _ => true);
         Assert.Equal(["Fix", "Fix all", "Translate", "Improve prompt"], vm.Slices.Select(x => x.Label));
         Assert.Equal("Ctrl+Alt+Space", vm.Slices[0].Caption);
         Assert.Null(vm.Slices[3].Caption);
@@ -40,7 +40,7 @@ public class DonutTests
         var s = TestServices.EnsureInitialized("de");
         var skills = DefaultEnabled();
         skills.Add(SkillCatalog.NewCustomSkill("Fix"));
-        var vm = new DonutViewModel(skills, s.Loc, true);
+        var vm = new DonutViewModel(skills, s.Loc, _ => true);
         Assert.Equal("Alles korrigieren", vm.Slices[1].Label);
         Assert.Equal("Fix", vm.Slices[4].Label);
         TestServices.EnsureInitialized("en");
@@ -50,14 +50,14 @@ public class DonutTests
     public void Ai_skills_are_not_usable_without_an_online_model_and_say_why()
     {
         var s = TestServices.EnsureInitialized("en");
-        var vm = new DonutViewModel(DefaultEnabled(), s.Loc, aiReady: false);
+        var vm = new DonutViewModel(DefaultEnabled(), s.Loc, _ => false);
         Assert.All(vm.Slices, slice => Assert.False(slice.IsEnabled));
         Assert.NotEqual("", vm.AiHint);
         int? result = -2;
         vm.Completed += r => result = r;
         Assert.False(vm.Choose(2));
         Assert.Equal(-2, result);
-        var ready = new DonutViewModel(DefaultEnabled(), s.Loc, aiReady: true);
+        var ready = new DonutViewModel(DefaultEnabled(), s.Loc, _ => true);
         ready.Completed += r => result = r;
         Assert.True(ready.Choose(0));
         Assert.Equal(0, result);
@@ -67,10 +67,24 @@ public class DonutTests
     }
 
     [AvaloniaFact]
+    public void One_usable_skill_does_not_hide_the_others_notice()
+    {
+        var s = TestServices.EnsureInitialized("en");
+        var skills = DefaultEnabled();
+        var vm = new DonutViewModel(skills, s.Loc, skill => skill.Id == SkillIds.Fix);
+        Assert.True(vm.Slices[0].IsEnabled);
+        Assert.False(vm.Slices[1].IsEnabled);
+        Assert.Equal("", vm.AiHint);
+        vm.Hover = 1;
+        Assert.Equal(s.Loc["donut.needs_ai"], vm.CenterSubtitle);
+        Assert.False(vm.Choose(1));
+    }
+
+    [AvaloniaFact]
     public void More_than_nine_skills_make_pages_and_digits_follow_the_page()
     {
         var s = TestServices.EnsureInitialized("en");
-        var vm = new DonutViewModel(Skills(12), s.Loc, true);
+        var vm = new DonutViewModel(Skills(12), s.Loc, _ => true);
         Assert.Equal(2, vm.PageCount);
         Assert.Equal(8, vm.Slices.Count);
         int? result = null;
@@ -92,7 +106,7 @@ public class DonutTests
     public void Cancel_and_an_empty_donut_report_cleanly()
     {
         var s = TestServices.EnsureInitialized("en");
-        var vm = new DonutViewModel([], s.Loc, true);
+        var vm = new DonutViewModel([], s.Loc, _ => true);
         Assert.Equal(s.Loc["donut.none"], vm.CenterTitle);
         var cancelled = false;
         vm.Completed += r => cancelled = r is null;
@@ -104,7 +118,7 @@ public class DonutTests
     public void Keyboard_keys_pick_move_page_and_cancel()
     {
         var s = TestServices.EnsureInitialized("en");
-        var vm = new DonutViewModel(Skills(12), s.Loc, true);
+        var vm = new DonutViewModel(Skills(12), s.Loc, _ => true);
         var window = new RadialWindow { DataContext = vm };
         window.Show();
         var results = new List<int?>();
@@ -138,7 +152,7 @@ public class DonutTests
     public void The_mouse_picks_the_slice_under_it_and_cancels_in_the_hole_or_outside()
     {
         var s = TestServices.EnsureInitialized("en");
-        var vm = new DonutViewModel(Skills(4), s.Loc, true);
+        var vm = new DonutViewModel(Skills(4), s.Loc, _ => true);
         var window = new RadialWindow { DataContext = vm };
         window.Show();
         var results = new List<int?>();
@@ -164,7 +178,7 @@ public class DonutTests
     public void The_mouse_wheel_turns_the_page()
     {
         var s = TestServices.EnsureInitialized("en");
-        var vm = new DonutViewModel(Skills(12), s.Loc, true);
+        var vm = new DonutViewModel(Skills(12), s.Loc, _ => true);
         var window = new RadialWindow { DataContext = vm };
         window.Show();
         var motion = Motion.Enabled;
@@ -189,7 +203,7 @@ public class DonutTests
     {
         var s = TestServices.EnsureInitialized("en");
         TestServices.Ports.Focused.Clear();
-        var shown = s.Donut.ShowAsync(DefaultEnabled(), new ScreenPoint(300, 300), aiReady: true);
+        var shown = s.Donut.ShowAsync(DefaultEnabled(), new ScreenPoint(300, 300), _ => true);
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
         var window = s.Donut.Window!;
         Assert.True(window.IsVisible);
@@ -203,7 +217,7 @@ public class DonutTests
     public async Task Escape_closes_the_donut_without_a_choice()
     {
         var s = TestServices.EnsureInitialized("en");
-        var shown = s.Donut.ShowAsync(DefaultEnabled(), new ScreenPoint(300, 300), aiReady: true);
+        var shown = s.Donut.ShowAsync(DefaultEnabled(), new ScreenPoint(300, 300), _ => true);
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
         s.Donut.Window!.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
         Assert.Null(await shown);
@@ -213,7 +227,6 @@ public class DonutTests
     public async Task A_preview_uses_the_current_look_and_a_pick_does_not_run_a_skill()
     {
         var s = TestServices.EnsureInitialized("en");
-        s.Store.Settings.LlmEnabled = true;
         s.Store.Settings.Donut.OuterRadius = 200;
         s.Store.Settings.Donut.Opacity = 0.5;
         s.Store.Settings.Donut.ShowShortcutHints = false;
@@ -247,7 +260,6 @@ public class DonutTests
                 s.Donut.Window!.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
             if (preview is not null)
                 await preview;
-            s.Store.Settings.LlmEnabled = false;
             s.Store.Settings.Donut = new DonutSettings();
             TestServices.Ports.Keys.Remove(LlmDefaults.ProviderGoogle);
             TestServices.Ports.Selection = null;

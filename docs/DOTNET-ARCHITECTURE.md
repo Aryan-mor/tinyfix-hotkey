@@ -15,10 +15,10 @@ field), press a shortcut, and the result replaces the selection.
 * Every skill has a global shortcut. The **skill selector** (default `Ctrl+Alt+M`) is a donut (radial) menu that opens at the
   caret or, when Settings says so, the mouse pointer: press `1`-`9`, click a slice, `Tab` or the wheel turns the page when there are more than nine
   skills, `Esc` or a click outside cancels.
-* **Every skill goes through an online LLM** (Google Gemini, OpenRouter, any OpenAI-compatible server, with a fallback
-  model), in any language. There is **no offline engine** in the C# app. With AI off a skill shows the localized notice
-  "Turn on an online model in Settings".
-* Settings: General, Donut, Skills, Online AI, Updates, About.
+* **Every skill goes through an AI model** (Google Gemini, OpenRouter, OpenAI, Anthropic, Ollama, LM Studio, or a custom
+  server, with a fallback model), in any language. There is **no other engine** in the C# app. With no usable model a skill shows the localized notice
+  "Set up an AI model in Settings to use this skill."
+* Settings: General, Donut, Skills, AI models, Updates, About.
 
 ## Projects
 
@@ -114,14 +114,14 @@ Persian and Japanese texts are machine-generated and welcome a review.** Fonts a
 `%APPDATA%\TinyFix` (Windows), `~/Library/Application Support/TinyFix` (macOS), `~/.config/tinyfix` (Linux), or the folder in
 `TINYFIX_DATA_DIR`. Files are written atomically (temp file + rename, `AtomicFile`).
 
-* `settings.json`: language, theme, donut size, opacity, where it opens and whether slices show shortcuts, online model settings (never keys).
+* `settings.json`: language, theme, donut size, opacity, where it opens and whether slices show shortcuts, model settings (never keys). An old `llm_enabled` value is ignored.
 * `skills.json`: the **same schema as the Python app** (`version`, `skill_menu_hotkey`, `dismissed`, `skills[]` with
   `id, name, input_mode, prompt, hotkey, enabled, builtin, offline_fallback, model_mode, model_provider, model,
   model_fallback_provider, model_fallback`), parsed by hand so one wrong field does not lose the rest.
 * Secrets: Windows DPAPI file `secrets.dpapi` in the Python app's format (`{"keys": {...}}`), macOS Keychain, Linux
   `secret-tool` with an AES-GCM encrypted file fallback that shows a warning.
 * **Import, once:** on the first start the app looks for the Python app's `skills.json`, `secrets.dpapi` and `config.ini`
-  (online settings) in `%LOCALAPPDATA%\Programs\TinyFix Hotkey` (or `TINYFIX_LEGACY_DIR`) and copies what the new data folder
+  (model settings) in `%LOCALAPPDATA%\Programs\TinyFix Hotkey` (or `TINYFIX_LEGACY_DIR`) and copies what the new data folder
   lacks, then records `legacy_imported`. With `TINYFIX_DATA_DIR` set the real installation is never read.
 
 ### Single instance

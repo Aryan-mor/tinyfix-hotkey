@@ -9,13 +9,15 @@ namespace TinyFix.Core.Tests;
 /// <summary>An HTTP handler that answers from a delegate and records the requests.</summary>
 internal sealed class FakeHandler(Func<HttpRequestMessage, string, HttpResponseMessage> respond) : HttpMessageHandler
 {
-    public List<(string Url, string Body, string? Auth, string? GoogleKey)> Requests { get; } = [];
+    public List<(string Url, string Body, string? Auth, string? GoogleKey, string? AnthropicKey, string? AnthropicVersion)> Requests { get; } = [];
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
         Requests.Add((request.RequestUri!.ToString(), body, request.Headers.Authorization?.ToString(),
-            request.Headers.TryGetValues("x-goog-api-key", out var v) ? v.First() : null));
+            request.Headers.TryGetValues("x-goog-api-key", out var google) ? google.First() : null,
+            request.Headers.TryGetValues("x-api-key", out var anthropic) ? anthropic.First() : null,
+            request.Headers.TryGetValues("anthropic-version", out var version) ? version.First() : null));
         return respond(request, body);
     }
 
@@ -39,7 +41,10 @@ internal sealed class ManualTime : TimeProvider
 
 public class LlmTests
 {
-    private static LlmConfig Config() => new() { ApiKey = "k", Model = "main", FallbackModel = "backup", Enabled = true };
+    private static LlmEndpoint Google(string model, string key = "k") =>
+        new() { Protocol = LlmProtocols.Google, ApiKey = key, Model = model };
+
+    private static LlmConfig Config() => new() { Main = Google("main"), Fallback = Google("backup") };
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
@@ -119,13 +124,8 @@ public class LlmTests
                 : FakeHandler.Json(FakeHandler.ChatAnswer("fixed")));
         var config = new LlmConfig
         {
-            Provider = LlmDefaults.ProviderGoogle,
-            ApiKey = "g-key",
-            Model = "main",
-            FallbackModel = "openai/gpt-x",
-            FallbackProvider = LlmDefaults.ProviderOpenRouter,
-            FallbackApiKey = "or-key",
-            Enabled = true,
+            Main = new LlmEndpoint { Protocol = LlmProtocols.Google, ApiKey = "g-key", Model = "main" },
+            Fallback = new LlmEndpoint { Protocol = LlmProtocols.OpenRouter, ApiKey = "or-key", Model = "openai/gpt-x" },
         };
         var client = new LlmClient(new HttpClient(handler));
         var result = await client.CompleteWithSourceAsync(config, "p", ct: Ct);
@@ -141,19 +141,25 @@ public class LlmTests
     {
         var config = new LlmConfig
         {
-            Provider = LlmDefaults.ProviderGoogle,
-            ApiKey = "g",
-            Model = "m",
-            FallbackModel = "x",
-            FallbackProvider = LlmDefaults.ProviderOpenRouter,
-            FallbackApiKey = "",
+            Main = new LlmEndpoint { Protocol = LlmProtocols.Google, ApiKey = "g", Model = "m" },
+            Fallback = new LlmEndpoint { Protocol = LlmProtocols.OpenRouter, ApiKey = "", Model = "x" },
         };
-        Assert.Null(LlmConfigResolver.Fallback(config));
-        Assert.Equal(LlmDefaults.ProviderOpenRouter, LlmConfigResolver.Fallback(config with { FallbackApiKey = "k" })!.Provider);
-        var same = new LlmConfig { Provider = LlmDefaults.ProviderOpenRouter, ApiKey = "k", Model = "a", FallbackModel = "b" };
-        Assert.Equal("b", LlmConfigResolver.Fallback(same)!.Model);
-        Assert.Equal("k", LlmConfigResolver.Fallback(same)!.ApiKey);
-        Assert.Null(LlmConfigResolver.Fallback(same with { FallbackModel = "a" }));
+        Assert.Null(LlmConfigResolver.UsableFallback(config));
+        Assert.Equal(LlmProtocols.OpenRouter, LlmConfigResolver.UsableFallback(config with
+        {
+            Fallback = config.Fallback! with { ApiKey = "k" },
+        })!.Protocol);
+        var same = new LlmConfig
+        {
+            Main = new LlmEndpoint { Protocol = LlmProtocols.OpenRouter, ApiKey = "k", Model = "a" },
+            Fallback = new LlmEndpoint { Protocol = LlmProtocols.OpenRouter, ApiKey = "k", Model = "b" },
+        };
+        Assert.Equal("b", LlmConfigResolver.UsableFallback(same)!.Model);
+        Assert.Equal("k", LlmConfigResolver.UsableFallback(same)!.ApiKey);
+        Assert.Null(LlmConfigResolver.UsableFallback(same with { Fallback = same.Fallback! with { Model = "a" } }));
+        // A local fallback needs no key.
+        var local = config with { Fallback = new LlmEndpoint { Protocol = LlmProtocols.Ollama, Model = "llama3.2" } };
+        Assert.Equal(LlmProtocols.Ollama, LlmConfigResolver.UsableFallback(local)!.Protocol);
     }
 
     [Fact]
@@ -162,11 +168,12 @@ public class LlmTests
         var handler = new FakeHandler((_, _) => FakeHandler.Json(FakeHandler.ChatAnswer("ok")));
         var config = new LlmConfig
         {
-            Provider = LlmDefaults.ProviderOpenRouter,
-            ApiKey = "sk-or",
-            Model = "deepseek/deepseek-v4.1-flash",
-            FallbackModel = "",
-            Enabled = true,
+            Main = new LlmEndpoint
+            {
+                Protocol = LlmProtocols.OpenRouter,
+                ApiKey = "sk-or",
+                Model = "deepseek/deepseek-v4.1-flash",
+            },
         };
         Assert.Equal("ok", await new LlmClient(new HttpClient(handler)).CompleteAsync(config, "p", ct: Ct));
         var request = Assert.Single(handler.Requests);
@@ -181,12 +188,13 @@ public class LlmTests
         var handler = new FakeHandler((_, _) => FakeHandler.Json(FakeHandler.ChatAnswer("```\\nHi friends\\n```")));
         var config = new LlmConfig
         {
-            Provider = LlmDefaults.ProviderOpenAi,
-            ApiKey = "sk-test-key",
-            Model = "local-model",
-            BaseUrl = "http://127.0.0.1:1234",
-            FallbackModel = "",
-            Enabled = true,
+            Main = new LlmEndpoint
+            {
+                Protocol = LlmProtocols.LmStudio,
+                ApiKey = "sk-test-key",
+                Model = "local-model",
+                BaseUrl = "http://127.0.0.1:1234",
+            },
         };
         var client = new LlmClient(new HttpClient(handler));
         var result = await client.CompleteWithSourceAsync(config, "p", ct: Ct);
@@ -231,7 +239,7 @@ public class LlmTests
     {
         var handler = new FakeHandler((_, _) => FakeHandler.Json(FakeHandler.GeminiAnswer("ok")));
         var client = new LlmClient(new HttpClient(handler));
-        var run = await client.RunSkillAsync(Config() with { TimeoutSeconds = 2, Enabled = true }, "T: {{content}}", "hi", ct: Ct);
+        var run = await client.RunSkillAsync(Config() with { Main = Config().Main with { TimeoutSeconds = 2 } }, "T: {{content}}", "hi", ct: Ct);
         Assert.Equal(("ok", 'M'), (run.Text, run.Source));
         Assert.Contains("T: hi", handler.Requests[0].Body);
     }
@@ -240,7 +248,7 @@ public class LlmTests
     public async Task Run_skill_refuses_when_ai_is_off()
     {
         var client = new LlmClient(new HttpClient(new FakeHandler((_, _) => FakeHandler.Json("{}"))));
-        await Assert.ThrowsAsync<LlmException>(() => client.RunSkillAsync(Config() with { Enabled = false }, "t", "x", ct: Ct));
+        await Assert.ThrowsAsync<LlmException>(() => client.RunSkillAsync(Config() with { Main = Config().Main with { Model = "" } }, "t", "x", ct: Ct));
         await Assert.ThrowsAsync<LlmException>(() => client.RunSkillAsync(null, "t", "x", ct: Ct));
     }
 
@@ -249,28 +257,112 @@ public class LlmTests
     {
         var baseConfig = new LlmConfig
         {
-            Provider = LlmDefaults.ProviderGoogle,
-            ApiKey = "g",
-            Model = "gemini-3.5-flash-lite",
-            FallbackModel = "gemini-3.6-flash",
-            Enabled = true,
+            Main = new LlmEndpoint { Protocol = LlmProtocols.Google, ApiKey = "g", Model = "gemini-3.5-flash-lite" },
+            Fallback = new LlmEndpoint { Protocol = LlmProtocols.Google, ApiKey = "g", Model = "gemini-3.6-flash" },
         };
         Assert.Same(baseConfig, LlmConfigResolver.ForSkill(baseConfig, ModelModes.Default));
         var better = LlmConfigResolver.ForSkill(baseConfig, ModelModes.Better);
-        Assert.Equal(LlmConfigResolver.BetterModels[LlmDefaults.ProviderGoogle], (better.Model, better.FallbackModel));
-        Assert.Equal("g", better.ApiKey);
-        Assert.Equal("", better.FallbackProvider);
-        var plain = new LlmConfig { Provider = LlmDefaults.ProviderOpenAi, ApiKey = "k", Model = "m", Enabled = true };
+        Assert.Equal(LlmConfigResolver.BetterModels[LlmProtocols.Google], (better.Main.Model, better.Fallback!.Model));
+        Assert.Equal("g", better.Main.ApiKey);
+        Assert.Equal(better.Main.Protocol, better.Fallback.Protocol);
+        Assert.Equal("g", better.Fallback.ApiKey);
+        var plain = new LlmConfig { Main = new LlmEndpoint { Protocol = LlmProtocols.OpenAi, ApiKey = "k", Model = "m" } };
         Assert.Same(plain, LlmConfigResolver.ForSkill(plain, ModelModes.Better));
 
-        var custom = new SkillModelChoice(LlmDefaults.ProviderOpenRouter, "anthropic/claude-sonnet-5.5", LlmDefaults.ProviderGoogle, "gemini-3.5-flash-lite");
+        var custom = new SkillModelChoice(LlmProtocols.OpenRouter, "anthropic/claude-sonnet-5.5", LlmProtocols.Google, "gemini-3.5-flash-lite");
         var keys = new Dictionary<string, string> { ["openrouter"] = "or", ["google"] = "g" };
         var cfg = LlmConfigResolver.ForSkill(baseConfig, ModelModes.Custom, custom, keys);
-        Assert.Equal((LlmDefaults.ProviderOpenRouter, "or", "anthropic/claude-sonnet-5.5"), (cfg.Provider, cfg.ApiKey, cfg.Model));
-        Assert.Equal((LlmDefaults.ProviderGoogle, "g", "gemini-3.5-flash-lite"), (cfg.FallbackProvider, cfg.FallbackApiKey, cfg.FallbackModel));
-        // No key for the chosen provider: use the Online AI settings instead of failing.
-        Assert.Same(baseConfig, LlmConfigResolver.ForSkill(baseConfig, ModelModes.Custom, custom, new Dictionary<string, string>()));
+        Assert.Equal((LlmProtocols.OpenRouter, "or", "anthropic/claude-sonnet-5.5"), (cfg.Main.Protocol, cfg.Main.ApiKey, cfg.Main.Model));
+        Assert.Equal((LlmProtocols.Google, "g", "gemini-3.5-flash-lite"), (cfg.Fallback!.Protocol, cfg.Fallback.ApiKey, cfg.Fallback.Model));
+        // No key for the chosen provider: the override still wins (a key is optional; the request may then fail).
+        var missing = LlmConfigResolver.ForSkill(baseConfig, ModelModes.Custom, custom, new Dictionary<string, string>());
+        Assert.Equal(LlmProtocols.OpenRouter, missing.Main.Protocol);
+        Assert.Equal("", missing.Main.ApiKey);
         // Empty custom fields mean "use the global ones".
-        Assert.Equal("gemini-3.5-flash-lite", LlmConfigResolver.ForSkill(baseConfig, ModelModes.Custom, new SkillModelChoice()).Model);
+        Assert.Equal("gemini-3.5-flash-lite", LlmConfigResolver.ForSkill(baseConfig, ModelModes.Custom, new SkillModelChoice()).Main.Model);
+    }
+
+    [Fact]
+    public async Task Each_protocol_sends_its_own_request_shape()
+    {
+        var handler = new FakeHandler((req, _) =>
+        {
+            if (req.RequestUri!.AbsolutePath.Contains("generateContent", StringComparison.Ordinal))
+                return FakeHandler.Json(FakeHandler.GeminiAnswer("g"));
+            if (req.RequestUri.AbsolutePath.Contains("/messages", StringComparison.Ordinal))
+                return FakeHandler.Json("{\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}");
+            return FakeHandler.Json(FakeHandler.ChatAnswer("o"));
+        });
+        var client = new LlmClient(new HttpClient(handler));
+
+        Assert.Equal("g", await client.CompleteAsync(new LlmConfig
+        {
+            Main = new LlmEndpoint { Protocol = LlmProtocols.Google, ApiKey = "g-key", Model = "gemini-3.5-flash-lite" },
+        }, "p", ct: Ct));
+        Assert.Contains("/models/gemini-3.5-flash-lite:generateContent", handler.Requests[0].Url, StringComparison.Ordinal);
+        Assert.Equal("g-key", handler.Requests[0].GoogleKey);
+        Assert.Contains("\"text\":\"p\"", handler.Requests[0].Body);
+
+        Assert.Equal("o", await client.CompleteAsync(new LlmConfig
+        {
+            Main = new LlmEndpoint { Protocol = LlmProtocols.Ollama, Model = "llama3.2" },
+        }, "p", ct: Ct));
+        Assert.Equal("http://localhost:11434/v1/chat/completions", handler.Requests[1].Url);
+        Assert.Null(handler.Requests[1].Auth);
+        Assert.Contains("\"model\":\"llama3.2\"", handler.Requests[1].Body);
+
+        Assert.Equal("o", await client.CompleteAsync(new LlmConfig
+        {
+            Main = new LlmEndpoint { Protocol = LlmProtocols.Custom, Model = "m", BaseUrl = "http://127.0.0.1:9/v1" },
+        }, "p", ct: Ct));
+        Assert.Equal("http://127.0.0.1:9/v1/chat/completions", handler.Requests[2].Url);
+
+        Assert.Equal("a", await client.CompleteAsync(new LlmConfig
+        {
+            Main = new LlmEndpoint { Protocol = LlmProtocols.Anthropic, ApiKey = "a-key", Model = "claude-sonnet-4-5" },
+        }, "p", ct: Ct));
+        var anthropic = handler.Requests[3];
+        Assert.Equal("https://api.anthropic.com/v1/messages", anthropic.Url);
+        Assert.Equal("a-key", anthropic.AnthropicKey);
+        Assert.Equal(LlmProtocols.AnthropicVersion, anthropic.AnthropicVersion);
+        Assert.Contains("\"max_tokens\":4096", anthropic.Body);
+        Assert.DoesNotContain("a-key", anthropic.Body);
+    }
+
+    [Fact]
+    public async Task Probe_asks_for_ok_and_an_error_keeps_the_status_and_hides_the_key()
+    {
+        var handler = new FakeHandler((_, body) =>
+            body.Contains(LlmDefaults.ProbePrompt, StringComparison.Ordinal)
+                ? FakeHandler.Json("{\"error\":\"no\"}", System.Net.HttpStatusCode.TooManyRequests)
+                : FakeHandler.Json(FakeHandler.ChatAnswer("no")));
+        var endpoint = new LlmEndpoint { Protocol = LlmProtocols.OpenAi, ApiKey = "sk-secret-999", Model = "gpt-4o-mini" };
+        var ex = await Assert.ThrowsAsync<LlmException>(() => new LlmClient(new HttpClient(handler)).ProbeAsync(endpoint, Ct));
+        Assert.Equal(429, ex.StatusCode);
+        Assert.Contains("HTTP 429", ex.Message);
+        Assert.DoesNotContain("sk-secret-999", ex.Message);
+        Assert.Contains(LlmDefaults.ProbePrompt, handler.Requests[0].Body);
+    }
+
+    [Fact]
+    public async Task Empty_answer_and_server_error_use_the_fallback()
+    {
+        var calls = new List<int>();
+        var handler = new FakeHandler((req, _) =>
+        {
+            calls.Add(req.RequestUri!.AbsolutePath.Contains("backup", StringComparison.Ordinal) ? 1 : 0);
+            return req.RequestUri.AbsolutePath.Contains("backup", StringComparison.Ordinal)
+                ? FakeHandler.Json(FakeHandler.GeminiAnswer("ok"))
+                : FakeHandler.Json("{\"candidates\":[]}");
+        });
+        Assert.Equal("ok", await new LlmClient(new HttpClient(handler)).CompleteAsync(Config(), "p", ct: Ct));
+        Assert.Equal([0, 1], calls);
+
+        calls.Clear();
+        var server = new FakeHandler((req, _) =>
+            req.RequestUri!.AbsolutePath.Contains("backup", StringComparison.Ordinal)
+                ? FakeHandler.Json(FakeHandler.GeminiAnswer("ok"))
+                : FakeHandler.Json("{}", System.Net.HttpStatusCode.InternalServerError));
+        Assert.Equal("ok", await new LlmClient(new HttpClient(server)).CompleteAsync(Config(), "p", ct: Ct));
     }
 }

@@ -19,14 +19,15 @@ public sealed partial class DonutViewModel : ObservableObject
 
     /// <summary>
     /// Builds the donut for <paramref name="skills"/> (already filtered to the enabled ones).
+    /// <paramref name="usable"/> says whether that skill's model can answer. A skill with its own override is judged on that override.
     /// <paramref name="look"/> is the size, opacity and shortcut hints copied when the donut opens; null keeps today's defaults.
     /// </summary>
-    public DonutViewModel(IReadOnlyList<Skill> skills, ILocalizer loc, bool aiReady, DonutLook? look = null)
+    public DonutViewModel(IReadOnlyList<Skill> skills, ILocalizer loc, Func<Skill, bool> usable, DonutLook? look = null)
     {
         _loc = loc;
         _look = look ?? DonutLook.Default;
-        _all = skills.Select((s, i) => (i, SkillNames.Display(s, loc), s.HotkeyValue().IsDisabled ? "" : s.DisplayHotkey(), !s.NeedsAi || aiReady, SliceIcons.For(s.Id))).ToList();
-        AiHint = !aiReady && skills.Any(s => s.NeedsAi) ? loc["donut.ai_hint"] : "";
+        _all = skills.Select((s, i) => (i, SkillNames.Display(s, loc), s.HotkeyValue().IsDisabled ? "" : s.DisplayHotkey(), !s.NeedsAi || usable(s), SliceIcons.For(s.Id))).ToList();
+        AiHint = _all.Count > 0 && _all.All(item => !item.Usable) ? loc["donut.ai_hint"] : "";
     }
 
     /// <summary>Raised once: the chosen skill index, or null when the donut was cancelled.</summary>
@@ -45,7 +46,7 @@ public sealed partial class DonutViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CenterTitle), nameof(CenterSubtitle), nameof(CenterNotice))]
     private int _hover = -1;
 
-    /// <summary>Why AI skills are greyed out, or empty.</summary>
+    /// <summary>Shown in the hub when no skill has a usable model, or empty.</summary>
     public string AiHint { get; }
 
     /// <summary>Number of pages.</summary>

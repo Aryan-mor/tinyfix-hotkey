@@ -4,7 +4,7 @@ using Avalonia.Controls;
 
 namespace TinyFix.App.Views.Pages;
 
-/// <summary>Online AI settings.</summary>
+/// <summary>AI model settings.</summary>
 public partial class OnlinePage : UserControl
 {
     /// <summary>Creates the page.</summary>

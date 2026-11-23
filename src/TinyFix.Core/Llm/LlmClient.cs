@@ -1,5 +1,5 @@
-// Calls Google Gemini or an OpenAI-compatible chat API with a short timeout and a model fallback.
-// Ported from llm_client.py. Never logs or puts into an exception message the API key or the user's text.
+// Calls a main endpoint, then an optional fallback, over Gemini, OpenAI-compatible chat, or Anthropic Messages.
+// Never logs or puts into an exception message the API key or the user's text.
 
 using System.Net;
 using System.Text;
@@ -14,7 +14,7 @@ namespace TinyFix.Core.Llm;
 /// <param name="Source">M main model, F fallback model, L local server.</param>
 public readonly record struct LlmResult(string Text, char Source);
 
-/// <summary>Sends prompts to the configured provider.</summary>
+/// <summary>Sends prompts to the configured endpoints.</summary>
 public sealed partial class LlmClient
 {
     private readonly HttpClient _http;
@@ -63,12 +63,12 @@ public sealed partial class LlmClient
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             throw new LlmException(LlmErrorKind.Config, "The base URL must start with https:// (or http:// for localhost).");
-        var host = uri.Host.ToLowerInvariant();
-        if (uri.Scheme == "http" && host is not ("127.0.0.1" or "localhost" or "::1" or "[::1]"))
+        var host = uri.IdnHost.ToLowerInvariant();
+        if (uri.Scheme == "http" && host is not ("127.0.0.1" or "localhost" or "::1"))
             throw new LlmException(LlmErrorKind.Config, "HTTP base URLs are only allowed for localhost. Use HTTPS for a remote provider.");
     }
 
-    /// <summary>Sends <paramref name="prompt"/> and returns the cleaned answer, using the fallback model when needed.</summary>
+    /// <summary>Sends <paramref name="prompt"/> and returns the cleaned answer, using the fallback endpoint when needed.</summary>
     /// <exception cref="LlmException">The request failed.</exception>
     public async Task<string> CompleteAsync(LlmConfig config, string prompt, TimeSpan? timeout = null, CancellationToken ct = default) =>
         (await CompleteWithSourceAsync(config, prompt, timeout, ct).ConfigureAwait(false)).Text;
@@ -77,43 +77,43 @@ public sealed partial class LlmClient
     public async Task<LlmResult> CompleteWithSourceAsync(LlmConfig config, string prompt, TimeSpan? timeout = null,
         CancellationToken ct = default)
     {
-        var wait = timeout ?? TimeSpan.FromSeconds(config.TimeoutSeconds);
-        if (wait <= TimeSpan.Zero)
-            wait = TimeSpan.FromSeconds(LlmDefaults.DefaultTimeoutSeconds);
-        if (string.IsNullOrWhiteSpace(config.ApiKey) && config.Provider is LlmDefaults.ProviderGoogle or LlmDefaults.ProviderOpenRouter)
-            throw new LlmException(LlmErrorKind.Config, "An API key is required");
-        if (string.IsNullOrWhiteSpace(config.Model))
+        if (string.IsNullOrWhiteSpace(config.Main.Model))
             throw new LlmException(LlmErrorKind.Config, "A model name is required");
-        if (!LlmDefaults.Providers.Contains(config.Provider))
-            throw new LlmException(LlmErrorKind.Config, $"Unknown provider: {config.Provider}");
-        return await CompleteWithFallbackAsync(config, prompt, wait, ct).ConfigureAwait(false);
+        if (!LlmProtocols.All.Contains(config.Main.Protocol) && config.Main.Protocol != LlmDefaults.ProviderOpenAi)
+            throw new LlmException(LlmErrorKind.Config, $"Unknown provider: {config.Main.Protocol}");
+        var mainBase = EffectiveBase(config.Main);
+        if (LlmProtocols.RequiresKey(config.Main.Protocol, mainBase) && string.IsNullOrWhiteSpace(config.Main.ApiKey))
+            throw new LlmException(LlmErrorKind.Config, "An API key is required");
+        return await CompleteWithFallbackAsync(config, prompt, timeout, ct).ConfigureAwait(false);
     }
 
-    private async Task<LlmResult> CompleteWithFallbackAsync(LlmConfig config, string prompt, TimeSpan timeout, CancellationToken ct)
+    private async Task<LlmResult> CompleteWithFallbackAsync(LlmConfig config, string prompt, TimeSpan? timeout, CancellationToken ct)
     {
-        var backupConfig = LlmConfigResolver.Fallback(config);
-        if (backupConfig is null)
-            return await AttemptAsync(config, prompt, timeout, 'M', ct).ConfigureAwait(false);
+        var backup = LlmConfigResolver.UsableFallback(config);
+        var mainWait = timeout ?? Span(config.Main.TimeoutSeconds);
+        if (backup is null)
+            return await AttemptAsync(config.Main, prompt, mainWait, 'M', ct).ConfigureAwait(false);
 
-        var main = (string.IsNullOrWhiteSpace(config.Model) ? LlmDefaults.DefaultModelFor(config.Provider) : config.Model).Trim();
-        var key = $"{config.Provider}:{main}";
+        var main = config.Main.Model.Trim();
+        var key = $"{config.Main.Protocol}:{main}";
         bool inWindow;
         lock (_gate)
             inWindow = _fallbackUntil.TryGetValue(key, out var until) && until > _time.GetUtcNow();
+        var backupWait = timeout ?? Span(backup.TimeoutSeconds);
         if (inWindow)
         {
             try
             {
-                return await AttemptAsync(backupConfig, prompt, timeout, 'F', ct).ConfigureAwait(false);
+                return await AttemptAsync(backup, prompt, backupWait, 'F', ct).ConfigureAwait(false);
             }
             catch (LlmException)
             {
-                return await AttemptAsync(config, prompt, timeout, 'M', ct).ConfigureAwait(false);
+                return await AttemptAsync(config.Main, prompt, mainWait, 'M', ct).ConfigureAwait(false);
             }
         }
         try
         {
-            return await AttemptAsync(config, prompt, timeout, 'M', ct).ConfigureAwait(false);
+            return await AttemptAsync(config.Main, prompt, mainWait, 'M', ct).ConfigureAwait(false);
         }
         catch (LlmException ex) when (ex.FallbackWorthy)
         {
@@ -121,7 +121,7 @@ public sealed partial class LlmClient
                 _fallbackUntil[key] = _time.GetUtcNow() + LlmDefaults.FallbackWindow;
             try
             {
-                return await AttemptAsync(backupConfig, prompt, timeout, 'F', ct).ConfigureAwait(false);
+                return await AttemptAsync(backup, prompt, backupWait, 'F', ct).ConfigureAwait(false);
             }
             catch (LlmException)
             {
@@ -134,24 +134,34 @@ public sealed partial class LlmClient
         }
     }
 
-    private async Task<LlmResult> AttemptAsync(LlmConfig config, string prompt, TimeSpan timeout, char letter, CancellationToken ct)
+    private async Task<LlmResult> AttemptAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, char letter, CancellationToken ct)
     {
-        var text = config.Provider == LlmDefaults.ProviderGoogle
-            ? await CompleteGeminiAsync(config, prompt, timeout, ct).ConfigureAwait(false)
-            : await CompleteOpenAiAsync(config, prompt, timeout, ct).ConfigureAwait(false);
-        return new LlmResult(text, IsLocal(config) ? 'L' : letter);
+        var text = endpoint.Protocol switch
+        {
+            LlmProtocols.Google => await CompleteGeminiAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
+            LlmProtocols.Anthropic => await CompleteAnthropicAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
+            _ => await CompleteOpenAiAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
+        };
+        return new LlmResult(text, IsLocal(endpoint) ? 'L' : letter);
     }
 
-    private static bool IsLocal(LlmConfig config) =>
-        config.Provider == LlmDefaults.ProviderOpenAi && Uri.TryCreate(config.BaseUrl, UriKind.Absolute, out var uri) &&
-        uri.Host.ToLowerInvariant() is "127.0.0.1" or "localhost" or "::1" or "[::1]";
+    private static bool IsLocal(LlmEndpoint endpoint) =>
+        LlmProtocols.IsLocalPreset(endpoint.Protocol) || LlmProtocols.IsLoopback(EffectiveBase(endpoint));
 
-    private async Task<string> CompleteGeminiAsync(LlmConfig config, string prompt, TimeSpan timeout, CancellationToken ct)
+    private static string EffectiveBase(LlmEndpoint endpoint) =>
+        string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmProtocols.DefaultBaseUrl(endpoint.Protocol) : endpoint.BaseUrl.Trim();
+
+    private static TimeSpan Span(double seconds) =>
+        TimeSpan.FromSeconds(seconds > 0 ? seconds : LlmDefaults.DefaultTimeoutSeconds);
+
+    private async Task<string> CompleteGeminiAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
     {
-        var model = (string.IsNullOrWhiteSpace(config.Model) ? LlmDefaults.GoogleModel : config.Model).Trim();
+        var model = (string.IsNullOrWhiteSpace(endpoint.Model) ? LlmDefaults.GoogleModel : endpoint.Model).Trim();
         if (model.StartsWith("models/", StringComparison.Ordinal))
             model = model["models/".Length..];
-        var url = $"{LlmDefaults.GeminiBase}/models/{model}:generateContent";
+        var baseUrl = string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmDefaults.GeminiBase : endpoint.BaseUrl.Trim().TrimEnd('/');
+        AssertSafeBaseUrl(baseUrl);
+        var url = $"{baseUrl}/models/{Uri.EscapeDataString(model)}:generateContent";
         var body = BuildJson(w =>
         {
             w.WriteStartObject();
@@ -169,7 +179,7 @@ public sealed partial class LlmClient
             w.WriteEndObject();
             w.WriteEndObject();
         });
-        using var doc = await SendAsync(HttpMethod.Post, url, body, GeminiHeaders(config.ApiKey), timeout, config.ApiKey, ct).ConfigureAwait(false);
+        using var doc = await SendAsync(HttpMethod.Post, url, body, GeminiHeaders(endpoint.ApiKey), timeout, endpoint.ApiKey, ct).ConfigureAwait(false);
         var sb = new StringBuilder();
         if (doc.RootElement.TryGetProperty("candidates", out var candidates) && candidates.ValueKind == JsonValueKind.Array &&
             candidates.GetArrayLength() > 0)
@@ -192,11 +202,19 @@ public sealed partial class LlmClient
         return PromptRenderer.StripModelOutput(sb.ToString());
     }
 
-    private async Task<string> CompleteOpenAiAsync(LlmConfig config, string prompt, TimeSpan timeout, CancellationToken ct)
+    private async Task<string> CompleteOpenAiAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
     {
-        var baseUrl = config.Provider == LlmDefaults.ProviderOpenRouter ? LlmDefaults.OpenRouterBase : NormalizeOpenAiBase(config.BaseUrl);
+        var protocol = endpoint.Protocol == LlmDefaults.ProviderOpenAi ? LlmProtocols.Custom : endpoint.Protocol;
+        var rawBase = string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmProtocols.DefaultBaseUrl(protocol) : endpoint.BaseUrl;
+        if (protocol == LlmProtocols.Custom && string.IsNullOrWhiteSpace(rawBase))
+            throw new LlmException(LlmErrorKind.Config, "A base URL is required");
+        var baseUrl = protocol == LlmProtocols.OpenRouter && string.IsNullOrWhiteSpace(endpoint.BaseUrl)
+            ? LlmDefaults.OpenRouterBase
+            : NormalizeOpenAiBase(rawBase);
         var url = $"{baseUrl}/chat/completions";
-        var model = string.IsNullOrWhiteSpace(config.Model) ? LlmDefaults.OpenAiModel : config.Model;
+        var model = string.IsNullOrWhiteSpace(endpoint.Model) ? LlmProtocols.DefaultModel(protocol) : endpoint.Model;
+        if (string.IsNullOrWhiteSpace(model))
+            throw new LlmException(LlmErrorKind.Config, "A model name is required");
         var body = BuildJson(w =>
         {
             w.WriteStartObject();
@@ -210,7 +228,7 @@ public sealed partial class LlmClient
             w.WriteEndArray();
             w.WriteEndObject();
         });
-        using var doc = await SendAsync(HttpMethod.Post, url, body, BearerHeaders(config.ApiKey), timeout, config.ApiKey, ct).ConfigureAwait(false);
+        using var doc = await SendAsync(HttpMethod.Post, url, body, BearerHeaders(endpoint.ApiKey), timeout, endpoint.ApiKey, ct).ConfigureAwait(false);
         if (!doc.RootElement.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
             throw new LlmException(LlmErrorKind.EmptyResponse, "The model returned no choices");
         string text = "";
@@ -233,16 +251,62 @@ public sealed partial class LlmClient
         return PromptRenderer.StripModelOutput(text);
     }
 
-    /// <summary>Lists the model ids the provider offers for the configured key.</summary>
-    public async Task<IReadOnlyList<string>> ListModelsAsync(LlmConfig config, TimeSpan? timeout = null, CancellationToken ct = default)
+    private async Task<string> CompleteAnthropicAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
     {
-        var wait = timeout ?? TimeSpan.FromSeconds(Math.Max(config.TimeoutSeconds, 5));
-        var names = new List<string>();
-        switch (config.Provider)
+        var baseUrl = string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmProtocols.AnthropicBase : endpoint.BaseUrl.Trim().TrimEnd('/');
+        AssertSafeBaseUrl(baseUrl);
+        string url;
+        if (baseUrl.EndsWith("/messages", StringComparison.Ordinal))
+            url = baseUrl;
+        else if (baseUrl.EndsWith("/v1", StringComparison.Ordinal))
+            url = baseUrl + "/messages";
+        else
+            url = baseUrl + "/v1/messages";
+        var model = string.IsNullOrWhiteSpace(endpoint.Model) ? LlmProtocols.AnthropicModel : endpoint.Model.Trim();
+        var body = BuildJson(w =>
         {
-            case LlmDefaults.ProviderGoogle:
+            w.WriteStartObject();
+            w.WriteString("model", model);
+            w.WriteNumber("max_tokens", 4096);
+            w.WriteNumber("temperature", 0.1);
+            w.WriteStartArray("messages");
+            w.WriteStartObject();
+            w.WriteString("role", "user");
+            w.WriteString("content", prompt);
+            w.WriteEndObject();
+            w.WriteEndArray();
+            w.WriteEndObject();
+        });
+        using var doc = await SendAsync(HttpMethod.Post, url, body, AnthropicHeaders(endpoint.ApiKey), timeout, endpoint.ApiKey, ct).ConfigureAwait(false);
+        var sb = new StringBuilder();
+        if (doc.RootElement.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var block in content.EnumerateArray())
+            {
+                if (block.ValueKind != JsonValueKind.Object)
+                    continue;
+                if (block.TryGetProperty("type", out var type) && type.GetString() != "text")
+                    continue;
+                if (block.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                    sb.Append(text.GetString());
+            }
+        }
+        if (string.IsNullOrWhiteSpace(sb.ToString()))
+            throw new LlmException(LlmErrorKind.EmptyResponse, "Anthropic returned empty text");
+        return PromptRenderer.StripModelOutput(sb.ToString());
+    }
+
+    /// <summary>Lists the model ids the endpoint offers.</summary>
+    public async Task<IReadOnlyList<string>> ListModelsAsync(LlmEndpoint endpoint, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        var wait = timeout ?? Span(Math.Max(endpoint.TimeoutSeconds, 5));
+        var names = new List<string>();
+        switch (endpoint.Protocol)
+        {
+            case LlmProtocols.Google:
                 {
-                    using var doc = await SendAsync(HttpMethod.Get, $"{LlmDefaults.GeminiBase}/models", null, GeminiHeaders(config.ApiKey), wait, config.ApiKey, ct).ConfigureAwait(false);
+                    var baseUrl = string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmDefaults.GeminiBase : endpoint.BaseUrl.Trim().TrimEnd('/');
+                    using var doc = await SendAsync(HttpMethod.Get, $"{baseUrl}/models", null, GeminiHeaders(endpoint.ApiKey), wait, endpoint.ApiKey, ct).ConfigureAwait(false);
                     if (doc.RootElement.TryGetProperty("models", out var models) && models.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var item in models.EnumerateArray())
@@ -259,14 +323,11 @@ public sealed partial class LlmClient
                     }
                     return names;
                 }
-            case LlmDefaults.ProviderOpenRouter:
-            case LlmDefaults.ProviderOpenAi:
+            case LlmProtocols.Anthropic:
                 {
-                    var baseUrl = config.Provider == LlmDefaults.ProviderOpenRouter ? LlmDefaults.OpenRouterBase : NormalizeOpenAiBase(config.BaseUrl);
-                    var headers = config.Provider == LlmDefaults.ProviderOpenRouter
-                        ? new Dictionary<string, string> { ["User-Agent"] = LlmDefaults.UserAgent }
-                        : BearerHeaders(config.ApiKey);
-                    using var doc = await SendAsync(HttpMethod.Get, $"{baseUrl}/models", null, headers, wait, config.ApiKey, ct).ConfigureAwait(false);
+                    var baseUrl = string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmProtocols.AnthropicBase : endpoint.BaseUrl.Trim().TrimEnd('/');
+                    var url = baseUrl.EndsWith("/v1", StringComparison.Ordinal) ? baseUrl + "/models" : baseUrl + "/v1/models";
+                    using var doc = await SendAsync(HttpMethod.Get, url, null, AnthropicHeaders(endpoint.ApiKey), wait, endpoint.ApiKey, ct).ConfigureAwait(false);
                     if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var item in data.EnumerateArray())
@@ -279,27 +340,46 @@ public sealed partial class LlmClient
                     return names;
                 }
             default:
-                throw new LlmException(LlmErrorKind.Config, $"Unknown provider: {config.Provider}");
+                {
+                    var protocol = endpoint.Protocol == LlmDefaults.ProviderOpenAi ? LlmProtocols.Custom : endpoint.Protocol;
+                    var rawBase = string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmProtocols.DefaultBaseUrl(protocol) : endpoint.BaseUrl;
+                    var baseUrl = NormalizeOpenAiBase(rawBase);
+                    using var doc = await SendAsync(HttpMethod.Get, $"{baseUrl}/models", null, BearerHeaders(endpoint.ApiKey), wait, endpoint.ApiKey, ct).ConfigureAwait(false);
+                    if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in data.EnumerateArray())
+                        {
+                            var name = item.TryGetProperty("id", out var id) ? id.GetString()?.Trim() ?? "" : "";
+                            if (name.Length > 0)
+                                names.Add(name);
+                        }
+                    }
+                    return names;
+                }
         }
     }
 
-    /// <summary>Sends a tiny typo-correction request and returns the model text (the "test connection" button).</summary>
-    public Task<string> ProbeConnectionAsync(LlmConfig config, CancellationToken ct = default)
+    /// <summary>Sends "Reply with OK" to this one endpoint (no fallback) and returns the model text.</summary>
+    public Task<string> ProbeAsync(LlmEndpoint endpoint, CancellationToken ct = default)
     {
-        var prompt = PromptRenderer.Render(DefaultPrompts.Fix, LlmDefaults.TestSample);
-        // A little more room than the tight runtime default, unless the user set more.
-        return CompleteAsync(config, prompt, TimeSpan.FromSeconds(Math.Max(config.TimeoutSeconds, 8)), ct);
+        var config = new LlmConfig { Main = endpoint, Fallback = null };
+        return CompleteAsync(config, LlmDefaults.ProbePrompt, Span(Math.Max(endpoint.TimeoutSeconds, 8)), ct);
     }
 
-    /// <summary>Runs a skill prompt online. There is no offline fallback for skills.</summary>
-    /// <exception cref="LlmException">AI is off or the request failed.</exception>
-    public async Task<LlmResult> RunSkillAsync(LlmConfig? config, string template, string text, string? language = null,
-        CancellationToken ct = default)
+    /// <summary>Sends a tiny request to the main endpoint and returns the model text (the "test connection" button).</summary>
+    public Task<string> ProbeConnectionAsync(LlmConfig config, CancellationToken ct = default) =>
+        ProbeAsync(config.Main, ct);
+
+    /// <summary>Runs a skill prompt. There is no other engine.</summary>
+    /// <exception cref="LlmException">No usable model is configured, or the request failed. The message never contains an API key.</exception>
+    public async Task<LlmResult> RunSkillAsync(LlmConfig? config, string template, string text,
+        IReadOnlyDictionary<string, string>? variables = null, CancellationToken ct = default)
     {
         if (config is null || !config.Ready)
-            throw new LlmException(LlmErrorKind.Config, "Turn on an online model in Settings to use this skill");
-        var prompt = PromptRenderer.Render(template, text, language);
-        var wait = TimeSpan.FromSeconds(Math.Max(config.TimeoutSeconds, LlmDefaults.SkillMinTimeoutSeconds));
+            throw new LlmException(LlmErrorKind.Config, "No AI model is configured");
+        var prompt = PromptRenderer.Render(template, text, variables);
+        var seconds = Math.Max(config.Main.TimeoutSeconds, config.Fallback?.TimeoutSeconds ?? 0);
+        var wait = TimeSpan.FromSeconds(Math.Max(seconds, LlmDefaults.SkillMinTimeoutSeconds));
         var result = await CompleteWithSourceAsync(config, prompt, wait, ct).ConfigureAwait(false);
         var cleaned = PromptRenderer.StripModelOutput(result.Text);
         if (cleaned.Length == 0)
@@ -307,19 +387,33 @@ public sealed partial class LlmClient
         return result with { Text = cleaned };
     }
 
-    private static Dictionary<string, string> GeminiHeaders(string apiKey) => new()
+    private static Dictionary<string, string> GeminiHeaders(string apiKey)
     {
+        var headers = new Dictionary<string, string> { ["User-Agent"] = LlmDefaults.UserAgent };
         // The header rather than the query string, so the key is less likely to appear in exception URLs.
-        ["x-goog-api-key"] = apiKey,
-        ["User-Agent"] = LlmDefaults.UserAgent,
-    };
+        if (apiKey.Length > 0)
+            headers["x-goog-api-key"] = apiKey;
+        return headers;
+    }
 
     private static Dictionary<string, string> BearerHeaders(string apiKey)
     {
         var headers = new Dictionary<string, string> { ["User-Agent"] = LlmDefaults.UserAgent };
-        // Some local servers need no key.
+        // Local and custom servers often need no key.
         if (apiKey.Length > 0)
             headers["Authorization"] = $"Bearer {apiKey}";
+        return headers;
+    }
+
+    private static Dictionary<string, string> AnthropicHeaders(string apiKey)
+    {
+        var headers = new Dictionary<string, string>
+        {
+            ["anthropic-version"] = LlmProtocols.AnthropicVersion,
+            ["User-Agent"] = LlmDefaults.UserAgent,
+        };
+        if (apiKey.Length > 0)
+            headers["x-api-key"] = apiKey;
         return headers;
     }
 

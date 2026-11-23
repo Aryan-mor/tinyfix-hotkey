@@ -78,6 +78,10 @@ public static class SkillStoreFile
             Model = GetString(item, "model", "") ?? "",
             ModelFallbackProvider = GetString(item, "model_fallback_provider", "") ?? "",
             ModelFallback = GetString(item, "model_fallback", "") ?? "",
+            ModelBaseUrl = GetString(item, "model_base_url", "") ?? "",
+            ModelFallbackBaseUrl = GetString(item, "model_fallback_base_url", "") ?? "",
+            ModelTimeout = GetDouble(item, "model_timeout"),
+            ModelFallbackTimeout = GetDouble(item, "model_fallback_timeout"),
         }.Normalize();
     }
 
@@ -91,6 +95,9 @@ public static class SkillStoreFile
 
     private static int GetInt(JsonElement e, string name, int fallback) =>
         e.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var v) && v > 0 ? v : fallback;
+
+    private static double GetDouble(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetDouble(out var v) && double.IsFinite(v) && v > 0 ? v : 0;
 
     /// <summary>The JSON text of a store, two-space indented like the Python app writes it.</summary>
     public static string Serialize(SkillStore store)
@@ -120,8 +127,12 @@ public static class SkillStoreFile
                 w.WriteString("model_mode", s.ModelMode);
                 w.WriteString("model_provider", s.ModelProvider);
                 w.WriteString("model", s.Model);
+                w.WriteString("model_base_url", s.ModelBaseUrl);
+                w.WriteNumber("model_timeout", s.ModelTimeout);
                 w.WriteString("model_fallback_provider", s.ModelFallbackProvider);
                 w.WriteString("model_fallback", s.ModelFallback);
+                w.WriteString("model_fallback_base_url", s.ModelFallbackBaseUrl);
+                w.WriteNumber("model_fallback_timeout", s.ModelFallbackTimeout);
                 w.WriteEndObject();
             }
             w.WriteEndArray();

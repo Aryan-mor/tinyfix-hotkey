@@ -111,7 +111,7 @@ public sealed class AboutPageViewModel : PageViewModel
         ?? "https://github.com/Aryan-mor/tinyfix-hotkey";
 
     /// <summary>Where the API keys are kept.</summary>
-    public string SecretBackend => _s.Loc.Format("online.secret_backend", _s.Platform.Secrets.Description);
+    public string SecretBackend => _s.Loc.Format("models.secret_backend", _s.Platform.Secrets.Description);
 
     /// <summary>The third-party notices text.</summary>
     public string Notices { get; }

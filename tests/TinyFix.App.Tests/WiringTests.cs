@@ -215,21 +215,20 @@ public class WiringTests
     {
         var s = TestServices.EnsureInitialized("en");
         using var page = new OnlinePageViewModel(s);
-        page.Enabled = true;
-        page.ProviderIndex = 1;
-        page.ApiKey = "sk-or-123";
-        page.Timeout = "7.5";
+        page.Main.ProtocolIndex = 1;
+        page.Main.ApiKey = "sk-or-123";
+        page.Main.Timeout = "7.5";
         page.SaveCommand.Execute(null);
-        Assert.True(s.Store.Settings.LlmEnabled);
-        Assert.Equal("openrouter", s.Store.Settings.LlmProvider);
-        Assert.Equal(7.5, s.Store.Settings.LlmTimeout);
+        Assert.Equal("openrouter", s.Store.Settings.Llm.Main.Protocol);
+        Assert.Equal(7.5, s.Store.Settings.Llm.Main.Timeout);
         Assert.Equal("sk-or-123", TestServices.Ports.Get("openrouter"));
-        Assert.Equal("", page.ApiKey);
-        Assert.True(page.HasSavedKey);
+        Assert.Equal("sk-or-123", TestServices.Ports.Get("main"));
+        Assert.Equal("", page.Main.ApiKey);
+        Assert.Equal(KeyFieldState.Saved, page.Main.State);
+        Assert.True(page.Main.HasSavedKey);
         // The key is in no settings file.
         Assert.DoesNotContain("sk-or-123", File.ReadAllText(s.Store.SettingsPath));
         Assert.DoesNotContain("sk-or-123", File.ReadAllText(s.Store.SkillsPath));
-        s.Store.Settings.LlmEnabled = false;
         TestServices.Ports.Keys.Clear();
     }
 
@@ -237,10 +236,11 @@ public class WiringTests
     public async Task The_online_test_button_reports_a_failure_without_the_key()
     {
         var s = TestServices.EnsureInitialized("en");
-        using var page = new OnlinePageViewModel(s) { ApiKey = "sk-secret-999" };
-        await page.TestCommand.ExecuteAsync(null);
-        Assert.Contains("Network error", page.Status);
-        Assert.DoesNotContain("sk-secret-999", page.Status);
+        using var page = new OnlinePageViewModel(s);
+        page.Main.ApiKey = "sk-secret-999";
+        await page.Main.TestCommand.ExecuteAsync(null);
+        Assert.Contains("Network error", page.Main.Status);
+        Assert.DoesNotContain("sk-secret-999", page.Main.Status);
     }
 
     [AvaloniaFact]

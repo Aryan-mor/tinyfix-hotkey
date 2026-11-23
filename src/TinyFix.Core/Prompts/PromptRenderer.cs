@@ -19,17 +19,40 @@ public static partial class PromptRenderer
     [GeneratedRegex("^```[^\\n]*\\n([\\s\\S]*?)\\n```$")]
     private static partial Regex Fence();
 
+    [GeneratedRegex(@"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")]
+    private static partial Regex Token();
+
     /// <summary>
     /// Replaces <c>{{content}}</c> and (when <paramref name="language"/> is given) <c>{{language}}</c>. A template
     /// without <c>{{content}}</c> gets the text appended, so a hand-written prompt never silently drops the selection.
     /// </summary>
     public static string Render(string? template, string content, string? language = null)
     {
+        if (language is null)
+            return Render(template, content, (IReadOnlyDictionary<string, string>?)null);
+        return Render(template, content, new Dictionary<string, string>(StringComparer.Ordinal) { [VariableNames.Language] = language });
+    }
+
+    /// <summary>
+    /// Replaces <c>{{name}}</c> with the matching variable, and <c>{{content}}</c> with <paramref name="content"/>.
+    /// Unknown tokens are left as written. Values are inserted in one pass, so a value that itself contains
+    /// <c>{{content}}</c> is not expanded again. A template without <c>{{content}}</c> gets the text appended.
+    /// </summary>
+    public static string Render(string? template, string content, IReadOnlyDictionary<string, string>? variables)
+    {
         var text = template ?? "";
-        if (language is not null)
-            text = text.Replace(LanguageToken, language, StringComparison.Ordinal);
-        if (text.Contains(ContentToken, StringComparison.Ordinal))
-            return text.Replace(ContentToken, content, StringComparison.Ordinal);
+        var hasContent = text.Contains(ContentToken, StringComparison.Ordinal);
+        text = Token().Replace(text, match =>
+        {
+            var name = match.Groups[1].Value;
+            if (name == VariableNames.Content)
+                return content;
+            if (variables is not null && variables.TryGetValue(name, out var value))
+                return value ?? "";
+            return match.Value;
+        });
+        if (hasContent)
+            return text;
         if (text.Length > 0 && !text.EndsWith('\n'))
             text += "\n";
         if (text.Length > 0)
