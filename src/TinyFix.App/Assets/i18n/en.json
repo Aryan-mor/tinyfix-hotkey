@@ -46,6 +46,13 @@
   "settings.theme_light": "Light",
   "settings.theme_dark": "Dark",
   "settings.autostart": "Start with the system",
+  "settings.keep_previous": "Keep the original text on the clipboard after a change",
+  "settings.change_toast": "Show a notice with Undo after a change",
+  "status.changed": "{0}: text changed",
+  "toast.undo": "Undo",
+  "status.undone": "Original text restored",
+  "status.undo_failed": "Could not undo. Press Ctrl+Z in your app.",
+  "status.moved": "{0}: the selection changed meanwhile, so nothing was pasted. The result is on your clipboard.",
   "settings.menu_shortcut": "Skill menu shortcut",
 
   "skills.desc": "Each skill has a name, a prompt, an input mode and an optional shortcut.",

@@ -49,6 +49,9 @@ public interface IKeySender
 
     /// <summary>Ctrl+A (Cmd+A on macOS).</summary>
     void SendSelectAll();
+
+    /// <summary>Ctrl+Z (Cmd+Z on macOS).</summary>
+    void SendUndo();
 }
 
 /// <summary>An opaque copy of everything on the clipboard, restored after TinyFix is done with it.</summary>
@@ -76,6 +79,17 @@ public interface IClipboardAccess
     void Clear();
 }
 
+/// <summary>A remembered spot in another app (see <see cref="IForegroundWindow.SaveFocus"/>).</summary>
+public interface IFocusAnchor
+{
+    /// <summary>Brings the window and control back and, when the control allows it, selects the remembered range again.</summary>
+    /// <returns>True when the exact range was selected again; false when only the window could be brought back.</returns>
+    bool Restore();
+
+    /// <summary>The spot a paste left behind: the same start, up to the caret. Null when the control cannot tell.</summary>
+    IFocusAnchor? AfterPaste();
+}
+
 /// <summary>Remembers the window the user was typing in and brings it back before keys are sent.</summary>
 public interface IForegroundWindow
 {
@@ -87,6 +101,12 @@ public interface IForegroundWindow
 
     /// <summary>True when the focused window runs with more rights than TinyFix, so synthetic keys cannot reach it (Windows UAC).</summary>
     bool IsTargetElevated();
+
+    /// <summary>
+    /// Remembers exactly where the user is typing (window, control and, where the OS allows it, the selected range) so
+    /// the result can go back to that spot even if the user clicks somewhere else meanwhile. Null when the OS cannot say.
+    /// </summary>
+    IFocusAnchor? SaveFocus() => null;
 
     /// <summary>Waits until Ctrl, Alt, Shift and Win are up so a held shortcut cannot turn a copy into something else.</summary>
     Task<bool> WaitForModifiersReleasedAsync(TimeSpan timeout, CancellationToken ct = default);

@@ -332,6 +332,8 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
             Languages.Add(new LanguageOption(code, name));
         _selectedLanguage = Languages.FirstOrDefault(option => option.Code == services.Store.Settings.Language) ?? Languages[0];
         _autostart = services.Platform.Autostart.IsEnabled;
+        _keepPrevious = services.Store.Settings.KeepPreviousOnClipboard;
+        _changeToast = services.Store.Settings.ShowChangeToast;
 
         foreach (var protocol in LlmProtocols.All)
             Providers.Add(new SetupProviderCard(protocol, TitleKey(protocol), DescriptionKey(protocol), SelectProvider));
@@ -387,6 +389,30 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
     /// <summary>Start with the system, read from the autostart port.</summary>
     [ObservableProperty]
     private bool _autostart;
+
+    /// <summary>Leave the text a skill replaced on the clipboard. On unless the user turns it off.</summary>
+    [ObservableProperty]
+    private bool _keepPrevious;
+
+    /// <summary>Show the "changed" toast with Undo.</summary>
+    [ObservableProperty]
+    private bool _changeToast;
+
+    partial void OnKeepPreviousChanged(bool value)
+    {
+        if (_loading)
+            return;
+        _services.Store.Settings.KeepPreviousOnClipboard = value;
+        _services.Store.SaveSettings();
+    }
+
+    partial void OnChangeToastChanged(bool value)
+    {
+        if (_loading)
+            return;
+        _services.Store.Settings.ShowChangeToast = value;
+        _services.Store.SaveSettings();
+    }
 
     /// <summary>True while the connection test is waiting.</summary>
     [ObservableProperty]

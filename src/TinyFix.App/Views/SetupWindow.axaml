@@ -354,6 +354,10 @@
           </Border>
           <ToggleSwitch IsChecked="{Binding Autostart}" Content="{DynamicResource settings.autostart}"
                         automation:AutomationProperties.Name="{DynamicResource settings.autostart}" />
+          <ToggleSwitch IsChecked="{Binding KeepPrevious}" Content="{DynamicResource settings.keep_previous}"
+                        automation:AutomationProperties.Name="{DynamicResource settings.keep_previous}" />
+          <ToggleSwitch IsChecked="{Binding ChangeToast}" Content="{DynamicResource settings.change_toast}"
+                        automation:AutomationProperties.Name="{DynamicResource settings.change_toast}" />
           <Button Classes="accent" HorizontalAlignment="Left" Content="{DynamicResource setup.done.try}"
                   Command="{Binding TryDonutCommand}"
                   automation:AutomationProperties.Name="{DynamicResource setup.done.try}" />

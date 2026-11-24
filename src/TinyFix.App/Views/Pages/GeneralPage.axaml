@@ -28,6 +28,8 @@
             </ComboBox>
           </StackPanel>
           <ToggleSwitch IsChecked="{Binding Autostart}" Content="{DynamicResource settings.autostart}" />
+          <ToggleSwitch IsChecked="{Binding KeepPrevious}" Content="{DynamicResource settings.keep_previous}" />
+          <ToggleSwitch IsChecked="{Binding ChangeToast}" Content="{DynamicResource settings.change_toast}" />
         </StackPanel>
       </Border>
       <TextBlock Text="{Binding PlatformNotice}" Classes="warning" IsVisible="{Binding PlatformNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />

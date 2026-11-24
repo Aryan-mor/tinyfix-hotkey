@@ -46,6 +46,13 @@
   "settings.theme_light": "ライト",
   "settings.theme_dark": "ダーク",
   "settings.autostart": "システム起動時に開始",
+  "settings.keep_previous": "変更後も元のテキストをクリップボードに残す",
+  "settings.change_toast": "変更後に元に戻すボタン付きの通知を表示",
+  "status.changed": "{0}：テキストを変更しました",
+  "toast.undo": "元に戻す",
+  "status.undone": "元のテキストに戻しました",
+  "status.undo_failed": "元に戻せませんでした。アプリで Ctrl+Z を押してください。",
+  "status.moved": "{0}：その間に選択範囲が変わったため貼り付けませんでした。結果はクリップボードにあります。",
   "settings.menu_shortcut": "スキルメニューのショートカット",
 
   "skills.desc": "各スキルには名前、プロンプト、入力モード、任意のショートカットがあります。",

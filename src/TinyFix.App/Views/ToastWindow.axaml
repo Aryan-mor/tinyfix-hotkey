@@ -17,6 +17,9 @@
                  SizeToContent="WidthAndHeight"
                  MaxWidth="420">
   <Border x:Name="Card" Classes="card" Margin="12" Padding="14,10" MaxWidth="380">
-    <TextBlock x:Name="Message" TextWrapping="Wrap" />
+    <StackPanel Orientation="Horizontal" Spacing="12">
+      <TextBlock x:Name="Message" TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="280" />
+      <Button x:Name="UndoButton" IsVisible="False" VerticalAlignment="Center" Padding="10,3" Click="OnUndo" />
+    </StackPanel>
   </Border>
 </Window>

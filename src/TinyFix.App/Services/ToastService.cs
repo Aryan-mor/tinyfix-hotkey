@@ -32,5 +32,18 @@ public sealed class ToastService(ILocalizer loc) : IStatusSink
     }
 
     /// <inheritdoc />
+    public void ShowUndo(string key, Func<Task> undo, params object[] args)
+    {
+        var text = args.Length == 0 ? loc[key] : loc.Format(key, args);
+        LastMessage = text;
+        var label = loc["toast.undo"];
+        Dispatcher.UIThread.Post(() =>
+        {
+            _window ??= new ToastWindow();
+            _window.Display(text, failure: false, label, () => _ = undo());
+        });
+    }
+
+    /// <inheritdoc />
     public void SetBusy(bool busy, char letter = '\0') => Dispatcher.UIThread.Post(() => Tray?.SetBusy(busy, letter));
 }

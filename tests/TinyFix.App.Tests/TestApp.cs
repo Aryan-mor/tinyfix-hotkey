@@ -112,6 +112,10 @@ internal sealed class FakePorts : IClipboardAccess, IKeySender, IForegroundWindo
     {
     }
 
+    public void SendUndo()
+    {
+    }
+
     public string? Save() => "window-1";
 
     public bool Restore(string? token)

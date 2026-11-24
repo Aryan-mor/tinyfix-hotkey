@@ -24,6 +24,9 @@ public interface IStatusSink
     /// <summary>Shows a short message (a toast or tray notice). <paramref name="key"/> is a key of the i18n files.</summary>
     void Show(StatusKind kind, string key, params object[] args);
 
+    /// <summary>Like <see cref="Show"/>, with an Undo button for a few seconds that runs <paramref name="undo"/>. Sinks without buttons just show the message.</summary>
+    void ShowUndo(string key, Func<Task> undo, params object[] args) => Show(StatusKind.Info, key, args);
+
     /// <summary>Shows or clears the "working" state of the tray icon; <paramref name="letter"/> tells which model answered.</summary>
     void SetBusy(bool busy, char letter = '\0');
 }
@@ -114,6 +117,8 @@ public sealed class SkillRunner(
             fg.Restore(targetWindow);
             await Task.Delay(50, ct).ConfigureAwait(false);
         }
+        // The window the text lives in: the donut's saved one, else whatever the shortcut was pressed in.
+        var window = targetWindow ?? fg.Save();
         if (fg.IsTargetElevated())
         {
             status.Show(StatusKind.Info, "status.elevated");
@@ -167,16 +172,52 @@ public sealed class SkillRunner(
             status.Show(StatusKind.Info, "status.no_changes", skill.Name);
             return outcome.ModelLetter;
         }
-        if (targetWindow is not null)
+
+        // The user may have clicked elsewhere while the model worked: go back to the exact spot and prove the same text
+        // is selected there. If not, never paste into whatever has the focus now; hand the result over on the clipboard.
+        if (!await selection.ReturnToSelectionAsync(capture, skill.SelectAll, window, ct).ConfigureAwait(false))
         {
-            fg.Restore(targetWindow);
-            await Task.Delay(20, ct).ConfigureAwait(false);
+            logger.LogInformation("Selection moved while {Skill} ran; result left on the clipboard", skill.Name);
+            if (selection.Stash(outcome.Text))
+                status.Show(StatusKind.Failure, "status.moved", skill.Name);
+            else
+            {
+                selection.RestoreClipboard(capture);
+                status.Show(StatusKind.Failure, "status.failed", skill.Name);
+            }
+            return outcome.ModelLetter;
         }
-        if (!await selection.PasteAsync(capture, outcome.Text, ct).ConfigureAwait(false))
+        var result = await selection.ReplaceAsync(capture, outcome.Text, store.Settings.KeepPreviousOnClipboard, ct).ConfigureAwait(false);
+        if (!result.Pasted)
+        {
             logger.LogInformation("Clipboard write failed; text left unchanged ({Skill})", skill.Name);
-        else
-            logger.LogInformation("Skill {Skill} changed {Length} character(s)", skill.Name, selected.Length);
+            return outcome.ModelLetter;
+        }
+        logger.LogInformation("Skill {Skill} changed {Length} character(s)", skill.Name, selected.Length);
+        if (store.Settings.ShowChangeToast)
+            status.ShowUndo("status.changed", () => UndoAsync(selected, outcome.Text, result.After, window), skill.Name);
         return outcome.ModelLetter;
+    }
+
+    /// <summary>Puts the original text back where <paramref name="replaced"/> was pasted (the Undo button of the "changed" toast).</summary>
+    private async Task UndoAsync(string original, string replaced, IFocusAnchor? after, string? window)
+    {
+        if (!await _busy.WaitAsync(0).ConfigureAwait(false))
+            return;
+        try
+        {
+            var ok = await selection.UndoAsync(after, window, replaced, original).ConfigureAwait(false);
+            status.Show(ok ? StatusKind.Info : StatusKind.Failure, ok ? "status.undone" : "status.undo_failed");
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            logger.LogError("Undo failed: {Type}", ex.GetType().Name);
+            status.Show(StatusKind.Failure, "status.undo_failed");
+        }
+        finally
+        {
+            _busy.Release();
+        }
     }
 
     /// <summary>Fixes the text on the clipboard in place (tray action, and the way to use TinyFix where global shortcuts do not work).</summary>

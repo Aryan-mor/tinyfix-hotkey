@@ -46,6 +46,13 @@
   "settings.theme_light": "Hell",
   "settings.theme_dark": "Dunkel",
   "settings.autostart": "Mit dem System starten",
+  "settings.keep_previous": "Den Originaltext nach einer Änderung in der Zwischenablage behalten",
+  "settings.change_toast": "Nach einer Änderung einen Hinweis mit Rückgängig anzeigen",
+  "status.changed": "{0}: Text geändert",
+  "toast.undo": "Rückgängig",
+  "status.undone": "Originaltext wiederhergestellt",
+  "status.undo_failed": "Rückgängig nicht möglich. Drücke Strg+Z in deiner App.",
+  "status.moved": "{0}: Die Auswahl hat sich inzwischen geändert, deshalb wurde nichts eingefügt. Das Ergebnis liegt in der Zwischenablage.",
   "settings.menu_shortcut": "Tastenkürzel für das Skill-Menü",
 
   "skills.desc": "Jeder Skill hat einen Namen, einen Prompt, einen Eingabemodus und optional ein Tastenkürzel.",
