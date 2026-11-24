@@ -1,0 +1,65 @@
+name: Bug report
+description: Something does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please **never paste API keys** or text you do not want to be public.
+        Security problems go through [private reporting](https://github.com/Aryan-mor/tinyfix-hotkey/security/advisories/new), not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Selected a sentence in Notepad
+        2. Pressed Ctrl+Alt+Space
+        3. Expected the fixed sentence; nothing was pasted
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: TinyFix version
+      description: Settings → About.
+      placeholder: "2.1.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS
+        - Linux (X11)
+        - Linux (Wayland)
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App you typed in
+      description: The app where the selection or paste failed, if it matters.
+      placeholder: "Chrome, Word, Slack, VS Code..."
+  - type: dropdown
+    id: provider
+    attributes:
+      label: AI provider
+      description: Leave empty for a layout conversion or a problem without a model.
+      options:
+        - Google
+        - OpenRouter
+        - Other OpenAI-compatible endpoint
+        - Local model (localhost)
+        - Not relevant
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines
+      description: |
+        Optional. Logs are in `%APPDATA%\TinyFix` (Windows), `~/Library/Application Support/TinyFix` (macOS) or `~/.config/tinyfix` (Linux).
+        TinyFix never logs your text or keys, but check before you paste.
+      render: text
