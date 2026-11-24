@@ -136,8 +136,11 @@
   "updates.checking": "確認中...",
   "updates.up_to_date": "最新バージョン（{0}）です。",
   "updates.available": "バージョン {0} が利用可能です。",
-  "updates.open": "ダウンロードページを開く",
+  "updates.open": "今すぐアップデート",
   "updates.failed": "アップデートを確認できませんでした。",
+  "updates.downloading": "アップデートをダウンロード中...",
+  "updates.installing": "アップデートをインストール中です。TinyFixは自動で再起動します。",
+  "updates.install_failed": "アップデートをインストールできませんでした。",
 
   "about.version": "バージョン {0}",
   "about.description": "TinyFixは、ショートカット一つで、どのアプリでもタイプミスを修正し、文章を書き換えます。",

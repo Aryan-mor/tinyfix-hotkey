@@ -53,3 +53,5 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\TinyFix.exe"; Description: "Launch TinyFix"; Flags: nowait postinstall skipifsilent
+; The in-app updater runs this setup silently: start the new version again when it is done.
+Filename: "{app}\TinyFix.exe"; Flags: nowait skipifnotsilent

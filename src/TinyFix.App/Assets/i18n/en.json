@@ -136,8 +136,11 @@
   "updates.checking": "Checking...",
   "updates.up_to_date": "You have the latest version ({0}).",
   "updates.available": "Version {0} is available.",
-  "updates.open": "Open the download page",
+  "updates.open": "Update now",
   "updates.failed": "Could not check for updates.",
+  "updates.downloading": "Downloading the update...",
+  "updates.installing": "Installing the update. TinyFix restarts by itself.",
+  "updates.install_failed": "Could not install the update.",
 
   "about.version": "Version {0}",
   "about.description": "TinyFix fixes typos and rewrites text in any app with a shortcut.",

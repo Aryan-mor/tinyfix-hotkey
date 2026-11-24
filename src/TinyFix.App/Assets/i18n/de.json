@@ -136,8 +136,11 @@
   "updates.checking": "Prüfe ...",
   "updates.up_to_date": "Du hast die neueste Version ({0}).",
   "updates.available": "Version {0} ist verfügbar.",
-  "updates.open": "Download-Seite öffnen",
+  "updates.open": "Jetzt aktualisieren",
   "updates.failed": "Die Suche nach Updates ist fehlgeschlagen.",
+  "updates.downloading": "Lade das Update herunter ...",
+  "updates.installing": "Installiere das Update. TinyFix startet von selbst neu.",
+  "updates.install_failed": "Das Update konnte nicht installiert werden.",
 
   "about.version": "Version {0}",
   "about.description": "TinyFix korrigiert Tippfehler und überarbeitet Text in jeder App per Tastenkürzel.",

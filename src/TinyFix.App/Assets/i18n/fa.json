@@ -136,8 +136,11 @@
   "updates.checking": "در حال بررسی...",
   "updates.up_to_date": "شما آخرین نسخه ({0}) را دارید.",
   "updates.available": "نسخه {0} در دسترس است.",
-  "updates.open": "باز کردن صفحه دانلود",
+  "updates.open": "هم‌اکنون به‌روزرسانی کن",
   "updates.failed": "بررسی به‌روزرسانی انجام نشد.",
+  "updates.downloading": "در حال دانلود به‌روزرسانی...",
+  "updates.installing": "در حال نصب به‌روزرسانی. TinyFix خودش دوباره اجرا می‌شود.",
+  "updates.install_failed": "نصب به‌روزرسانی انجام نشد.",
 
   "about.version": "نسخه {0}",
   "about.description": "TinyFix با یک میانبر، غلط‌های تایپی را اصلاح و متن را در هر برنامه‌ای بازنویسی می‌کند.",

@@ -121,7 +121,7 @@ public partial class App : Application
             if (latest is not null && UpdateChecker.IsNewer(latest.Version.ToString(), ViewModels.AboutPageViewModel.CurrentVersion))
                 services.Toasts.Show(StatusKind.Info, "updates.available", latest.Version);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or System.Text.Json.JsonException)
         {
             services.Log.LogInformation("Update check failed");
         }
