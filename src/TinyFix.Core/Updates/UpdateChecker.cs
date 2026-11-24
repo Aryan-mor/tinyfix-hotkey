@@ -109,7 +109,8 @@ public static partial class UpdateChecker
 
     /// <summary>Downloads the setup program to the temp folder and returns its path.</summary>
     /// <exception cref="HttpRequestException">The download failed.</exception>
-    public static async Task<string> DownloadInstallerAsync(HttpClient http, string installerUrl, CancellationToken ct = default)
+    public static async Task<string> DownloadInstallerAsync(HttpClient http, string installerUrl, CancellationToken ct = default,
+        IProgress<int>? percent = null)
     {
         var dir = Path.Combine(Path.GetTempPath(), "tinyfix-update");
         Directory.CreateDirectory(dir);
@@ -118,9 +119,28 @@ public static partial class UpdateChecker
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue("TinyFix-Hotkey-UpdateCheck", "2"));
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
+        var total = response.Content.Headers.ContentLength ?? 0;
         await using (var file = File.Create(path))
+        await using (var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
         {
-            await response.Content.CopyToAsync(file, ct).ConfigureAwait(false);
+            var buffer = new byte[81920];
+            long read = 0;
+            var last = -1;
+            int n;
+            while ((n = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            {
+                await file.WriteAsync(buffer.AsMemory(0, n), ct).ConfigureAwait(false);
+                read += n;
+                if (total > 0 && percent is not null)
+                {
+                    var p = (int)Math.Min(100, read * 100 / total);
+                    if (p != last)
+                    {
+                        last = p;
+                        percent.Report(p);
+                    }
+                }
+            }
         }
         return path;
     }

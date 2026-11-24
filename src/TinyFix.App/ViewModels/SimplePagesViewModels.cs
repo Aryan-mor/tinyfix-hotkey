@@ -94,7 +94,14 @@ public sealed partial class UpdatesPageViewModel : PageViewModel
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-            var path = await UpdateChecker.DownloadInstallerAsync(http, installerUrl).ConfigureAwait(true);
+            var downloading = true;
+            var progress = new Progress<int>(p =>
+            {
+                if (downloading)
+                    Status = $"{_s.Loc["updates.downloading"]} {p}%";
+            });
+            var path = await UpdateChecker.DownloadInstallerAsync(http, installerUrl, default, progress).ConfigureAwait(true);
+            downloading = false;
             Status = _s.Loc["updates.installing"];
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path,
                 "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS")
