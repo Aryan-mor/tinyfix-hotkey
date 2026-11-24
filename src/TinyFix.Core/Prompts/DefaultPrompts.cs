@@ -19,6 +19,8 @@ public static class DefaultPrompts
         "\n" +
         "Check every word, not only obvious typos. Fix a word that is a real or near-real word but is spelled wrongly for its meaning in context, including letter confusions between similar-sounding or similar-looking letters (for example Persian and Arabic: \u0637/\u062A, \u062B/\u0633/\u0635, \u0632/\u0630/\u0636/\u0638, \u0642/\u063A, \u062D/\u0647, \u06CC/\u064A, \u06A9/\u0643; and English: their/there, your/you're). Only change what is clearly misspelled; leave slang, informal speech, and names as written.\n" +
         "\n" +
+        "Preserve the author's voice. Keep every emoji, emoticon, and kaomoji exactly where it is: never remove, replace, move, or add one. Keep jokes, sarcasm, slang, teasing, playful or exaggerated spelling (such as \"sooo\" or \"hahaha\"), and repeated punctuation as written. A funny, warm, or casual message must stay funny, warm, and casual. Never make it more formal, neutral, or dry.\n" +
+        "\n" +
         "Do not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text. Don't use em dashes.\n" +
         "\n" +
         "{{content}}\n";
@@ -33,6 +35,8 @@ public static class DefaultPrompts
         "- Never add AI filler or stock phrases the author did not write, such as \"delve\", \"leverage\", \"seamless\", \"it is important to note\", \"in today's rapidly evolving landscape\", or \"in conclusion\".\n" +
         "- Never invent facts, numbers, names, stance, or personality. Keep every hedge and every rough edge the author chose.\n" +
         "- Replace any em dash or double-hyphen separator with a comma, colon, period, or parentheses, whichever fits. Keep all other punctuation as written.\n" +
+        "\n" +
+        "Preserve the author's voice. Keep every emoji, emoticon, and kaomoji exactly where it is: never remove, replace, move, or add one. Translate jokes, sarcasm, slang, teasing, and playful or exaggerated wording into the equivalent casual, funny register in {{language}}, so a funny or warm message stays just as funny or warm. Never make it more formal, neutral, or dry.\n" +
         "\n" +
         "Do not add a heading, explanation, or commentary. Do not wrap the result in quotation marks or code fences. Return only the translation. Don't use em dashes.\n" +
         "\n" +
@@ -135,6 +139,8 @@ public static class DefaultPrompts
         "\n" +
         "Do not overcorrect into a stiff \"humanizer\" voice. Never invent names, numbers, dates, or other specifics. If a concrete detail is missing, leave the original wording; do not insert placeholders, comments, or flags, because the user must receive only the rewritten text.\n" +
         "\n" +
+        "**Keep the feel.** Preserve the author's voice and emotional tone. Keep every emoji and emoticon (you may move one so it fits the rewritten sentence, but never drop, swap, or add one). Keep jokes, sarcasm, slang, teasing, and playful wording working as jokes. A funny, warm, or casual message must stay funny, warm, and casual after the rewrite. Never make it more formal, neutral, or dry.\n" +
+        "\n" +
         "Text to rewrite:\n" +
         "\n" +
         "{{content}}\n";
@@ -236,6 +242,8 @@ public static class DefaultPrompts
         "\n" +
         "Do not overcorrect into a stiff \"humanizer\" voice. Never invent names, numbers, dates, or other specifics. If a concrete detail is missing, leave the original wording; do not insert placeholders, comments, or flags, because the user must receive only the rewritten text.\n" +
         "\n" +
+        "**Keep the feel.** Preserve the author's voice and emotional tone. Keep every emoji and emoticon (you may move one so it fits the rewritten sentence, but never drop, swap, or add one). Keep jokes, sarcasm, slang, teasing, and playful wording working as jokes in {{language}}. A funny, warm, or casual message must stay funny, warm, and casual after the rewrite. Never make it more formal, neutral, or dry.\n" +
+        "\n" +
         "Text to rewrite into {{language}}:\n" +
         "\n" +
         "{{content}}\n";
@@ -300,6 +308,21 @@ public static class DefaultPrompts
         "Do not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text.\n" +
         "\n" +
         "{{content}}\n",
+        // Previous default (before the voice, emoji and humor rule).
+        "You are a precise copy editor. Correct spelling, grammar, capitalization, and typographical errors in the text below, and nothing else. Capitalize the first letter of every sentence and the pronoun \"I\" (for example, \"did you go?\" becomes \"Did you go?\"), and fix wrong or missing apostrophes.\n" +
+        "\n" +
+        "The text can be in any language. Correct it in its own language and keep that language. Keep the original meaning, tone, voice, formatting, punctuation style, line breaks, and spacing. Do not translate, summarize, rewrite for style, or add or remove content.\n" +
+        "\n" +
+        "Style rules, adapted from the No-Slop skill by Soheil Momeni (MIT License, https://github.com/soheilmomeniii/no-slop) and the AI De-Slopifier by Steven Boylan (https://github.com/StevenBoylan/de-slopifier):\n" +
+        "- Never add AI filler or stock phrases the author did not write, such as \"delve\", \"leverage\", \"seamless\", \"it is important to note\", \"in today's rapidly evolving landscape\", or \"in conclusion\".\n" +
+        "- Never invent facts, numbers, names, stance, or personality. Keep every hedge and every rough edge the author chose.\n" +
+        "- Replace any em dash or double-hyphen separator with a comma, colon, period, or parentheses, whichever fits. Keep all other punctuation as written.\n" +
+        "\n" +
+        "Check every word, not only obvious typos. Fix a word that is a real or near-real word but is spelled wrongly for its meaning in context, including letter confusions between similar-sounding or similar-looking letters (for example Persian and Arabic: ط/ت, ث/س/ص, ز/ذ/ض/ظ, ق/غ, ح/ه, ی/ي, ک/ك; and English: their/there, your/you're). Only change what is clearly misspelled; leave slang, informal speech, and names as written.\n" +
+        "\n" +
+        "Do not add a heading, explanation, apology, or commentary. Do not wrap the result in quotation marks or code fences. Return only the corrected text. Don't use em dashes.\n" +
+        "\n" +
+        "{{content}}\n",
     ];
 
     /// <summary>Older default Translate prompts.</summary>
@@ -308,6 +331,19 @@ public static class DefaultPrompts
         "Translate the text below into {{language}}.\n" +
         "\n" +
         "Keep the original meaning, tone, voice, formatting, and line breaks. Do not add a heading, explanation, or commentary. Do not wrap the result in quotation marks or code fences. Return only the translation.\n" +
+        "\n" +
+        "{{content}}\n",
+        // Previous default (before the voice, emoji and humor rule).
+        "Translate the text below into {{language}}.\n" +
+        "\n" +
+        "Keep the original meaning, tone, voice, formatting, and line breaks. Write natural {{language}}, not word-for-word output.\n" +
+        "\n" +
+        "Style rules, adapted from the No-Slop skill by Soheil Momeni (MIT License, https://github.com/soheilmomeniii/no-slop) and the AI De-Slopifier by Steven Boylan (https://github.com/StevenBoylan/de-slopifier):\n" +
+        "- Never add AI filler or stock phrases the author did not write, such as \"delve\", \"leverage\", \"seamless\", \"it is important to note\", \"in today's rapidly evolving landscape\", or \"in conclusion\".\n" +
+        "- Never invent facts, numbers, names, stance, or personality. Keep every hedge and every rough edge the author chose.\n" +
+        "- Replace any em dash or double-hyphen separator with a comma, colon, period, or parentheses, whichever fits. Keep all other punctuation as written.\n" +
+        "\n" +
+        "Do not add a heading, explanation, or commentary. Do not wrap the result in quotation marks or code fences. Return only the translation. Don't use em dashes.\n" +
         "\n" +
         "{{content}}\n",
     ];

@@ -4,7 +4,7 @@ name: dotnet
 
 on:
   push:
-    branches: [main, "rewrite/**", release-packaging]
+    branches: [main, "rewrite/**", release-packaging, setup-wizard]
     paths:
       - "src/**"
       - "tests/**"

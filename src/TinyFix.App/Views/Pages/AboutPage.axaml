@@ -17,6 +17,8 @@
       <Border Classes="card">
         <StackPanel Spacing="8">
           <Button x:Name="RepositoryButton" Content="{DynamicResource about.repository}" HorizontalAlignment="Left" />
+          <Button Content="{DynamicResource setup.about_again}" Command="{Binding RunSetupAgainCommand}" HorizontalAlignment="Left"
+                  AutomationProperties.Name="{DynamicResource setup.about_again}" />
           <TextBlock Text="{Binding SecretBackend}" Classes="caption" />
           <TextBlock Text="{DynamicResource about.translations}" Classes="caption" />
           <TextBlock Text="{DynamicResource about.experimental}" Classes="warning" IsVisible="{Binding ShowExperimental}" />

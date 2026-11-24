@@ -85,7 +85,7 @@ public sealed partial class UpdatesPageViewModel : PageViewModel
 }
 
 /// <summary>Version, links and notices.</summary>
-public sealed class AboutPageViewModel : PageViewModel
+public sealed partial class AboutPageViewModel : PageViewModel
 {
     private readonly AppServices _s;
 
@@ -135,6 +135,10 @@ public sealed class AboutPageViewModel : PageViewModel
 
     /// <summary>Opens the project page.</summary>
     public void OpenRepository() => UrlOpener.Open(RepositoryUrl);
+
+    /// <summary>Opens setup again. The saved model, skills, and keys stay.</summary>
+    [RelayCommand]
+    private void RunSetupAgain() => _s.Windows.ShowSetup();
 
     /// <inheritdoc />
     protected override void OnLanguageChanged(object? sender, EventArgs e)

@@ -92,10 +92,10 @@ public partial class LocalizationTests
         }
     }
 
-    [GeneratedRegex("\"((?:app|tray|donut|nav|settings|skills|shortcut|skill|models|updates|about|status|clipboard|common|variables)\\.[a-z0-9_-]+)\"")]
+    [GeneratedRegex("\"((?:app|tray|donut|nav|settings|skills|shortcut|skill|models|updates|about|status|clipboard|common|variables|setup)\\.[a-z0-9_-]+(?:\\.[a-z0-9_-]+)*)\"")]
     private static partial Regex KeyLiteral();
 
-    [GeneratedRegex("^(?:app|tray|donut|nav|settings|skills|shortcut|skill|models|updates|about|status|clipboard|common|variables)\\.")]
+    [GeneratedRegex("^(?:app|tray|donut|nav|settings|skills|shortcut|skill|models|updates|about|status|clipboard|common|variables|setup)\\.")]
     private static partial Regex KeyPrefix();
 
     [GeneratedRegex("\\{DynamicResource ([A-Za-z0-9_.-]+)\\}")]

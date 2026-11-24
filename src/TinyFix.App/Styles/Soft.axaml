@@ -30,6 +30,8 @@
           <SolidColorBrush x:Key="AccentSoftBrush" Color="#2E7F77DD" />
           <SolidColorBrush x:Key="AccentFaintBrush" Color="#177F77DD" />
           <SolidColorBrush x:Key="AccentStrongBrush" Color="#5F59A6" />
+          <!-- Links and the current step. Dark enough to read on the light page (the accent itself is not). -->
+          <SolidColorBrush x:Key="LinkBrush" Color="#5F59A6" />
           <SolidColorBrush x:Key="OnAccentBrush" Color="#16141A" />
           <!-- Plain buttons: the surface with a thin border, so only a disabled control is a flat grey (#524).
                ThemeService gives them a theme's own surface (Material You, theme.json). -->
@@ -60,6 +62,8 @@
           <SolidColorBrush x:Key="AccentSoftBrush" Color="#2E7F77DD" />
           <SolidColorBrush x:Key="AccentFaintBrush" Color="#177F77DD" />
           <SolidColorBrush x:Key="AccentStrongBrush" Color="#5F59A6" />
+          <!-- Links and the current step. Light enough to read on the dark page (AccentStrong is not). -->
+          <SolidColorBrush x:Key="LinkBrush" Color="#928BE2" />
           <SolidColorBrush x:Key="OnAccentBrush" Color="#16141A" />
           <SolidColorBrush x:Key="ButtonBackground" Color="#262624" />
           <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#31312E" />
@@ -221,6 +225,37 @@
   <Style Selector="Button.ghost">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+  </Style>
+  <!-- Filled accent. Enabled stays the accent fill; disabled is a quiet surface, so the two cannot be confused
+       (a dark theme otherwise paints both as the same grey). The label is the one that reads on the fill. -->
+  <Style Selector="Button.accent /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+  </Style>
+  <Style Selector="Button.accent:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentButtonBackgroundPointerOver}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentButtonBackgroundPointerOver}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+  </Style>
+  <Style Selector="Button.accent:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentButtonBackgroundPressed}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentButtonBackgroundPressed}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+  </Style>
+  <Style Selector="Button.accent:disabled">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="Button.accent:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource SubtleBorderBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="Button.accent:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
   </Style>
   <!-- Small links at the bottom of the navigation (GitHub, Sponsor) -->
   <Style Selector="Button.navlink">
@@ -555,7 +590,7 @@
   </Style>
 
   <!-- Buttons: M3 rounded pill derived from SoftRadius -->
-  <Style Selector="Window.material-you Button:not(.choice-card):not(.icon):not(.navlink)">
+  <Style Selector="Window.material-you Button:not(.icon):not(.navlink)">
     <Setter Property="CornerRadius" Value="{DynamicResource SoftRadiusPill}" />
     <Setter Property="FontWeight" Value="Medium" />
   </Style>
@@ -674,10 +709,10 @@
   </Style>
 
   <!-- ───────── Reduced motion: remove every transition and animation above ───────── -->
-  <Style Selector="Window.reduced-motion :is(Button), Window.reduced-motion :is(ToggleButton), Window.reduced-motion Border.chip, Window.reduced-motion ListBoxItem, Window.reduced-motion Slider /template/ Thumb#PART_Thumb, Window.reduced-motion ToggleSwitch, Window.reduced-motion ToggleSwitch /template/ Border#SwitchKnobBounds, Window.reduced-motion ToggleSwitch /template/ Ellipse#SwitchKnob, Window.reduced-motion CheckBox /template/ Border#NormalRectangle, Window.reduced-motion CheckBox /template/ Path#CheckGlyph, Window.reduced-motion Button.choice-card, Window.reduced-motion Button.preset-pill, Window.reduced-motion Border.navpane, Window.reduced-motion ListBox.nav PathIcon.navicon, Window.reduced-motion ComboBox /template/ PathIcon#DropDownGlyph">
+  <Style Selector="Window.reduced-motion :is(Button), Window.reduced-motion :is(ToggleButton), Window.reduced-motion Border.chip, Window.reduced-motion ListBoxItem, Window.reduced-motion Slider /template/ Thumb#PART_Thumb, Window.reduced-motion ToggleSwitch, Window.reduced-motion ToggleSwitch /template/ Border#SwitchKnobBounds, Window.reduced-motion ToggleSwitch /template/ Ellipse#SwitchKnob, Window.reduced-motion CheckBox /template/ Border#NormalRectangle, Window.reduced-motion CheckBox /template/ Path#CheckGlyph, Window.reduced-motion Button.preset-pill, Window.reduced-motion Border.navpane, Window.reduced-motion ListBox.nav PathIcon.navicon, Window.reduced-motion ComboBox /template/ PathIcon#DropDownGlyph">
     <Setter Property="Transitions" Value="{x:Null}" />
   </Style>
-  <Style Selector="Window.reduced-motion Button:pressed, Window.reduced-motion ToggleButton:pressed, Window.reduced-motion Border.chip:pointerover, Window.reduced-motion ListBox.nav ListBoxItem:pointerover PathIcon.navicon, Window.reduced-motion Slider /template/ Thumb#PART_Thumb:pointerover, Window.reduced-motion Slider /template/ Thumb#PART_Thumb:pressed, Window.reduced-motion ToggleSwitch:pointerover, Window.reduced-motion Button.choice-card:pointerover, Window.reduced-motion Button.preset-pill:pointerover, Window.reduced-motion Button.preset-pill:pressed">
+  <Style Selector="Window.reduced-motion Button:pressed, Window.reduced-motion ToggleButton:pressed, Window.reduced-motion Border.chip:pointerover, Window.reduced-motion ListBox.nav ListBoxItem:pointerover PathIcon.navicon, Window.reduced-motion Slider /template/ Thumb#PART_Thumb:pointerover, Window.reduced-motion Slider /template/ Thumb#PART_Thumb:pressed, Window.reduced-motion ToggleSwitch:pointerover, Window.reduced-motion Button.preset-pill:pointerover, Window.reduced-motion Button.preset-pill:pressed">
     <Setter Property="RenderTransform" Value="none" />
   </Style>
   <Style Selector="Window.reduced-motion ContentControl.page > :is(Control), Window.reduced-motion Border.history-card">

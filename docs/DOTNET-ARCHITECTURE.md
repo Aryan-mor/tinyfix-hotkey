@@ -127,7 +127,22 @@ Persian and Japanese texts are machine-generated and welcome a review.** Fonts a
 ### Single instance
 
 A named mutex plus a named pipe whose name includes a hash of the user and of `TINYFIX_DATA_DIR`. Starting TinyFix again
-sends the launch to the running one, which opens Settings. (Adapted from Filee's `SingleInstance`.)
+sends the launch to the running one, which opens Settings, or focuses the setup window when that is already open.
+(Adapted from Filee's `SingleInstance`.)
+
+### First-run setup
+
+`setup_completed` in `settings.json` starts false. A file that never had the field is read the same way, so an existing
+install sees the window once. After the tray icon is up and the background work starts, TinyFix opens `SetupWindow`
+when the flag is false. Skip, the window's close button, and Finish all set it, and the window does not open on the
+next start. `TINYFIX_SKIP_SETUP=1` (the smoke tests) suppresses that open. Settings, on the About page, and the tray
+item Setup... open the same window again and leave the saved model, skills, and keys in place.
+
+`SetupWizardViewModel` is the state machine the window binds to: welcome (the language picker writes the same setting
+as General), model (the shared endpoint editor; a saved key is only detected with `Contains`, never read), skills (the
+same skill store and shortcut conflicts as Settings), and a short summary. The autostart switch reads `IAutostart`
+(the first start has already registered TinyFix). "Try the donut now" calls the real preview, and a pick there does
+not run a skill. The connection test waits up to 20 seconds and does not change the timeout stored for skills.
 
 ### Security and privacy
 

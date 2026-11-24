@@ -1,5 +1,5 @@
 // Keeps one TinyFix per user. A later launch forwards its arguments through a named pipe and exits; the first
-// instance answers by opening Settings. Adapted from the reference project's single-instance helper (MIT, credited in THIRD-PARTY-NOTICES.md),
+// instance answers by opening Settings, or by focusing the setup window when that is already open. Adapted from the reference project's single-instance helper (MIT, credited in THIRD-PARTY-NOTICES.md),
 // reduced to what TinyFix needs.
 
 using System.IO.Pipes;

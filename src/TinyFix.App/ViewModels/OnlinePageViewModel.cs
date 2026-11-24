@@ -44,6 +44,15 @@ public sealed partial class OnlinePageViewModel : PageViewModel
     /// <summary>Warning about the secret store, or empty.</summary>
     public string SecretWarning { get; }
 
+    /// <summary>Reloads both endpoints after the setup wizard saved the same settings.</summary>
+    public void ReloadFromStore()
+    {
+        var settings = _s.Store.Settings;
+        Main.Load(settings.Llm.Main, use: true);
+        Fallback.Load(settings.Llm.Fallback, use: settings.Llm.Fallback is not null);
+        SyncFallbackMirror();
+    }
+
     /// <summary>Saves both endpoints. A newly typed key is stored here; replacing or removing a key already wrote it.</summary>
     [RelayCommand]
     private void Save()

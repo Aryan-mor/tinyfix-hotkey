@@ -102,6 +102,15 @@ public sealed partial class DonutPageViewModel : PageViewModel
             window.Position.Y + (int)Math.Round(window.Bounds.Height * scale / 2.0));
     }
 
+    /// <summary>Picks up a menu shortcut the setup wizard saved.</summary>
+    public void RefreshMenuShortcut()
+    {
+        _loading = true;
+        MenuShortcut = _s.Store.Skills.SkillMenuHotkey;
+        _loading = false;
+        RefreshConflicts();
+    }
+
     /// <summary>Opens the donut over Settings (or at the pointer) and closes it without running a skill.</summary>
     [RelayCommand]
     private Task Preview() => _s.Donut.PreviewAsync(PreviewAt());

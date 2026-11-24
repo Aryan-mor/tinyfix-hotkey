@@ -83,6 +83,7 @@ jobs:
           $data = Join-Path ([System.IO.Path]::GetTempPath()) ("tinyfix-smoke-" + [guid]::NewGuid().ToString('N'))
           New-Item -ItemType Directory -Path $data | Out-Null
           $env:TINYFIX_DATA_DIR = $data
+          $env:TINYFIX_SKIP_SETUP = '1'
           $bin = (Resolve-Path "artifacts/${{ matrix.rid }}/TinyFix.exe").Path
           $proc = Start-Process -FilePath $bin -PassThru
           $logPath = Join-Path $data 'logs\tinyfix.log'
@@ -108,6 +109,7 @@ jobs:
           set -euo pipefail
           data=$(mktemp -d)
           export TINYFIX_DATA_DIR="$data"
+          export TINYFIX_SKIP_SETUP=1
           bin="$(pwd)/artifacts/${{ matrix.rid }}/TinyFix"
           chmod +x "$bin"
           xvfb-run -a "$bin" >"$data/stdout.txt" 2>"$data/stderr.txt" &
@@ -146,6 +148,7 @@ jobs:
           echo "macOS smoke test is non-fatal: the runner may not be able to open a tray app (no window server)."
           data=$(mktemp -d)
           export TINYFIX_DATA_DIR="$data"
+          export TINYFIX_SKIP_SETUP=1
           bin="$(pwd)/artifacts/${{ matrix.rid }}/TinyFix"
           chmod +x "$bin"
           "$bin" >"$data/stdout.txt" 2>"$data/stderr.txt" &
