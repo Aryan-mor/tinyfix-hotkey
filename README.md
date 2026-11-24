@@ -89,7 +89,7 @@ dotnet format TinyFix.slnx --verify-no-changes
 dotnet test TinyFix.slnx -c Release
 ```
 
-Read [CONTRIBUTING-DOTNET.md](CONTRIBUTING-DOTNET.md) and [docs/DOTNET-ARCHITECTURE.md](docs/DOTNET-ARCHITECTURE.md) first. UI text lives in `src/TinyFix.App/Assets/i18n/*.json` (English, German, Persian, Japanese; the translations are machine-made and welcome review).
+Pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) explains how to open one. Read [CONTRIBUTING-DOTNET.md](CONTRIBUTING-DOTNET.md) and [docs/DOTNET-ARCHITECTURE.md](docs/DOTNET-ARCHITECTURE.md) first. UI text lives in `src/TinyFix.App/Assets/i18n/*.json` (English, German, Persian, Japanese; the translations are machine-made and welcome review).
 
 ## License
 
