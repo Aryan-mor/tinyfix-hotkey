@@ -5,6 +5,7 @@
 using System.Runtime.Versioning;
 using System.Text;
 using Microsoft.Win32;
+using TinyFix.Core.Layouts;
 using TinyFix.Core.Llm;
 using TinyFix.Platform.Windows;
 
@@ -18,6 +19,24 @@ public sealed class WindowsAdapterTests : IDisposable
     public WindowsAdapterTests() => Directory.CreateDirectory(_dir);
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
+
+    [Fact]
+    public void Installed_layouts_type_letters_and_convert_between_each_other()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows only");
+        var layouts = new WindowsKeyboardLayouts().Installed();
+        Assert.NotEmpty(layouts);
+        Assert.Equal(layouts.Count, layouts.Select(l => l.Language).Distinct().Count());
+        foreach (var layout in layouts)
+            Assert.True(layout.CountLetters("abcdefghijklmnopqrstuvwxyz") + layout.Keys.Count(k => char.IsLetter(k.Value)) > 0, layout.Name);
+
+        var en = LayoutConverter.Find(layouts, "en");
+        var fa = LayoutConverter.Find(layouts, "fa");
+        Assert.SkipUnless(en is not null && fa is not null, "English and Persian layouts are not both installed");
+        // The classic mix-up: "sghl" typed on the English layout is "سلام" on the Persian one.
+        Assert.Equal("سلام", LayoutConverter.Convert("sghl", en!, fa!));
+        Assert.Equal("sghl", LayoutConverter.Convert("سلام", fa!, en!));
+    }
 
     [Fact]
     public void Dpapi_keeps_keys_encrypted_in_the_python_file_format()

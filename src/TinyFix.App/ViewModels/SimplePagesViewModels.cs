@@ -66,7 +66,7 @@ public sealed partial class UpdatesPageViewModel : PageViewModel
             _s.Store.Settings.LastUpdateCheck = DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
             _s.Store.SaveSettings();
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or System.Text.Json.JsonException)
         {
             HasUpdate = false;
             Status = _s.Loc["updates.failed"];
@@ -79,9 +79,46 @@ public sealed partial class UpdatesPageViewModel : PageViewModel
 
     private bool CanCheck() => !Busy;
 
-    /// <summary>Opens the release page in the browser.</summary>
+    /// <summary>Downloads the new setup program, runs it silently and exits so it can replace the app.</summary>
     [RelayCommand]
-    private void OpenPage() => UrlOpener.Open(_latest?.Url ?? UpdateChecker.LatestPage);
+    private async Task InstallUpdateAsync()
+    {
+        if (_latest?.InstallerUrl is not { } installerUrl || !OperatingSystem.IsWindows())
+        {
+            UrlOpener.Open(_latest?.Url ?? UpdateChecker.LatestPage);
+            return;
+        }
+        Busy = true;
+        HasUpdate = false;
+        Status = _s.Loc["updates.downloading"];
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+            var downloading = true;
+            var progress = new Progress<int>(p =>
+            {
+                if (downloading)
+                    Status = $"{_s.Loc["updates.downloading"]} {p}%";
+            });
+            var path = await UpdateChecker.DownloadInstallerAsync(http, installerUrl, default, progress).ConfigureAwait(true);
+            downloading = false;
+            Status = _s.Loc["updates.installing"];
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path,
+                "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS")
+            { UseShellExecute = true });
+            (Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException
+                                       or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            HasUpdate = true;
+            Status = _s.Loc["updates.install_failed"];
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
 }
 
 /// <summary>Version, links and notices.</summary>

@@ -7,6 +7,7 @@ using TinyFix.Core.Platform;
 using TinyFix.Core.Selection;
 using TinyFix.Core.Settings;
 using TinyFix.Core.Skills;
+using TinyFix.Core.Usage;
 
 namespace TinyFix.App.Services;
 
@@ -23,6 +24,7 @@ public sealed class AppServices
     public required PlatformServices Platform { get; init; }
     public required IHotkeyService Hotkeys { get; init; }
     public required LlmClient Llm { get; init; }
+    public required UsageLedger Usage { get; init; }
     public required SkillRunner Runner { get; init; }
     public required SelectionService Selection { get; init; }
     public required ToastService Toasts { get; init; }
@@ -56,6 +58,15 @@ public static class AppHost
         platform ??= CreatePlatform(dataDirectory);
         var hook = hotkeys ?? new SharpHookHotkeyService(log);
         var llm = new LlmClient(http is null ? new HttpClient() : new HttpClient(http));
+        var usage = new UsageLedger(dataDirectory);
+        llm.Attempted += attempt =>
+        {
+            usage.Record(attempt);
+            // Which model answered or failed, and why: the one thing the log needs to explain a fallback. No text, no key.
+            log.LogInformation("Model {Role} {Protocol}/{Model}: {Outcome} in {Ms} ms, {In} in / {Out} out tokens",
+                attempt.Role, attempt.Protocol, attempt.Model, attempt.Success ? "ok" : attempt.Error, attempt.LatencyMs,
+                attempt.InputTokens, attempt.OutputTokens);
+        };
         var selection = new SelectionService(platform.Clipboard, keys ?? new SharpHookKeySender(), platform.Foreground);
         var theme = new ThemeService(store);
         loc.LanguageChanged += (_, _) => theme.Apply(loc.Language);
@@ -74,6 +85,7 @@ public static class AppHost
             Platform = platform,
             Hotkeys = hook,
             Llm = llm,
+            Usage = usage,
             Runner = runner,
             Selection = selection,
             Toasts = toasts,

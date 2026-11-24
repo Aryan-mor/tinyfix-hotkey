@@ -90,6 +90,7 @@ internal static partial class NativeMethods
     public const uint TokenQuery = 0x0008;
     public const int TokenElevation = 20;
     public const uint ProcessQueryLimitedInformation = 0x1000;
+    public const uint EmGetSel = 0x00B0, EmSetSel = 0x00B1, SmtoAbortIfHung = 0x0002;
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -169,6 +170,18 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll")]
     public static partial short GetAsyncKeyState(int vk);
 
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageTimeoutW")]
+    public static partial nint SendMessageTimeout(nint hwnd, uint message, ref int wParam, ref int lParam, uint flags, uint timeoutMs, out nint result);
+
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageTimeoutW")]
+    public static partial nint SendMessageTimeout(nint hwnd, uint message, nint wParam, nint lParam, uint flags, uint timeoutMs, out nint result);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetClassNameW")]
+    public static unsafe partial int GetClassName(nint hwnd, char* buffer, int maxCount);
+
+    [LibraryImport("user32.dll")]
+    public static partial nint SetFocus(nint hwnd);
+
     [LibraryImport("user32.dll")]
     public static partial uint SendInput(uint count, Input[] inputs, int size);
 
@@ -212,4 +225,13 @@ internal static partial class NativeMethods
 
     [LibraryImport("kernel32.dll")]
     public static partial nint LocalFree(nint handle);
+
+    [LibraryImport("user32.dll")]
+    public static unsafe partial int GetKeyboardLayoutList(int count, nint* layouts);
+
+    [LibraryImport("user32.dll")]
+    public static partial uint MapVirtualKeyExW(uint code, uint mapType, nint layout);
+
+    [LibraryImport("user32.dll")]
+    public static unsafe partial int ToUnicodeEx(uint virtualKey, uint scanCode, byte* keyState, char* buffer, int bufferSize, uint flags, nint layout);
 }

@@ -26,6 +26,9 @@ public sealed class SharpHookKeySender : IKeySender
     /// <inheritdoc />
     public void SendSelectAll() => Chord(KeyCode.VcA);
 
+    /// <inheritdoc />
+    public void SendUndo() => Chord(KeyCode.VcZ);
+
     private void Chord(KeyCode key)
     {
         Simulator.SimulateKeyPress(Modifier);

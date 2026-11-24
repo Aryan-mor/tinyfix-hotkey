@@ -22,6 +22,8 @@ internal static partial class SliceIcons
         ("language-markdown-outline", "M20.56 18H3.44C2.65 18 2 17.37 2 16.59V7.41C2 6.63 2.65 6 3.44 6H20.56C21.35 6 22 6.63 22 7.41V16.59C22 17.37 21.35 18 20.56 18M3.44 6.94C3.18 6.94 2.96 7.15 2.96 7.41V16.6C2.96 16.85 3.18 17.06 3.44 17.06H20.56C20.82 17.06 21.04 16.85 21.04 16.6V7.41C21.04 7.15 20.82 6.94 20.56 6.94H3.44M4.89 15.19V8.81H6.81L8.73 11.16L10.65 8.81H12.58V15.19H10.65V11.53L8.73 13.88L6.81 11.53V15.19H4.89M16.9 15.19L14 12.09H15.94V8.81H17.86V12.09H19.79L16.9 15.19", "language markdown"),
         ("language-html5", "M12,17.56L16.07,16.43L16.62,10.33H9.38L9.2,8.3H16.8L17,6.31H7L7.56,12.32H14.45L14.22,14.9L12,15.5L9.78,14.9L9.64,13.24H7.64L7.93,16.43L12,17.56M4.07,3H19.93L18.5,19.2L12,21L5.5,19.2L4.07,3Z", "language html5"),
         ("translate", "M12.87,15.07L10.33,12.56L10.36,12.53C12.1,10.59 13.34,8.36 14.07,6H17V4H10V2H8V4H1V6H12.17C11.5,7.92 10.44,9.75 9,11.35C8.07,10.32 7.3,9.19 6.69,8H4.69C5.42,9.63 6.42,11.17 7.67,12.56L2.58,17.58L4,19L9,14L12.11,17.11L12.87,15.07M18.5,10H16.5L12,22H14L15.12,19H19.87L21,22H23L18.5,10M15.88,17L17.5,12.67L19.12,17H15.88Z", "translate"),
+        ("keyboard-outline", "M19,10H17V8H19V10M19,13H17V11H19V13M16,10H14V8H16V10M16,13H14V11H16V13M16,17H8V15H16V17M7,10H5V8H7V10M7,13H5V11H7V13M8,8H10V10H8V8M8,11H10V13H8V11M11,8H13V10H11V8M11,11H13V13H11V11M20,5H4C2.89,5 2,5.89 2,7V17A2,2 0 0,0 4,19H20A2,2 0 0,0 22,17V7C22,5.89 21.1,5 20,5M20,17H4V7H20V17Z", "keyboard layout typing language wrong"),
+        ("swap-horizontal", "M21,9L17,5V8H10V10H17V13M7,11L3,15L7,19V16H14V14H7V11Z", "swap horizontal exchange switch both ways"),
         ("tag-outline", "M21.41 11.58L12.41 2.58A2 2 0 0 0 11 2H4A2 2 0 0 0 2 4V11A2 2 0 0 0 2.59 12.42L11.59 21.42A2 2 0 0 0 13 22A2 2 0 0 0 14.41 21.41L21.41 14.41A2 2 0 0 0 22 13A2 2 0 0 0 21.41 11.58M13 20L4 11V4H11L20 13M6.5 5A1.5 1.5 0 1 1 5 6.5A1.5 1.5 0 0 1 6.5 5Z", "tag"),
         ("tag-remove-outline", "M6.5 5A1.5 1.5 0 1 0 8 6.5A1.5 1.5 0 0 0 6.5 5M6.5 5A1.5 1.5 0 1 0 8 6.5A1.5 1.5 0 0 0 6.5 5M21.41 11.58L12.41 2.58A2 2 0 0 0 11 2H4A2 2 0 0 0 2 4V11A2 2 0 0 0 2.59 12.42L3 12.82A5.62 5.62 0 0 1 5.08 12.08L4 11V4H11L20 13L13 20L11.92 18.92A5.57 5.57 0 0 1 11.18 21L11.59 21.41A2 2 0 0 0 13 22A2 2 0 0 0 14.41 21.41L21.41 14.41A2 2 0 0 0 22 13A2 2 0 0 0 21.41 11.58M6.5 5A1.5 1.5 0 1 0 8 6.5A1.5 1.5 0 0 0 6.5 5M8.12 21.54L6 19.41L3.88 21.54L2.46 20.12L4.59 18L2.46 15.88L3.88 14.46L6 16.59L8.12 14.46L9.54 15.88L7.41 18L9.54 20.12Z", "tag remove metadata exif strip privacy"),
         ("card-account-details-outline", "M22,3H2C0.91,3.04 0.04,3.91 0,5V19C0.04,20.09 0.91,20.96 2,21H22C23.09,20.96 23.96,20.09 24,19V5C23.96,3.91 23.09,3.04 22,3M22,19H2V5H22V19M14,17V15.75C14,14.09 10.66,13.25 9,13.25C7.34,13.25 4,14.09 4,15.75V17H14M9,7A2.5,2.5 0 0,0 6.5,9.5A2.5,2.5 0 0,0 9,12A2.5,2.5 0 0,0 11.5,9.5A2.5,2.5 0 0,0 9,7M14,7V8H20V7H14M14,9V10H20V9H14M14,11V12H18V11H14", "card account details contact vcard"),
@@ -50,7 +52,7 @@ internal static partial class SliceIcons
     /// <summary>The icon picker's groups, in order; an icon can be in more than one.</summary>
     private static readonly (SliceIconCategory Category, string[] Keys)[] CategoryData =
     [
-        (SliceIconCategory.TextAndData, ["auto-fix", "pencil-outline", "format-text", "format-font", "code-json", "code-braces", "language-markdown-outline", "language-html5", "translate", "tag-outline", "tag-remove-outline", "card-account-details-outline", "calendar-month-outline", "email-outline"]),
+        (SliceIconCategory.TextAndData, ["auto-fix", "pencil-outline", "format-text", "format-font", "code-json", "code-braces", "language-markdown-outline", "language-html5", "translate", "keyboard-outline", "swap-horizontal", "tag-outline", "tag-remove-outline", "card-account-details-outline", "calendar-month-outline", "email-outline"]),
         (SliceIconCategory.General, ["crop", "crop-free", "rotate-left", "content-copy", "folder-move-outline", "lightning-bolt-outline", "star-outline", "heart-outline", "bookmark-outline", "flag-outline", "check-circle-outline", "cog-outline", "magnify", "eye-outline", "lock-outline", "shield-outline", "clock-outline", "delete-outline", "sync", "map-marker-outline", "cube-outline", "drawing", "application-outline"]),
     ];
 
@@ -63,5 +65,7 @@ internal static partial class SliceIcons
         ["rewrite"] = "pencil-outline",
         ["rewrite-language"] = "format-font",
         ["improve-prompt"] = "lightning-bolt-outline",
+        ["layout-any-fa"] = "keyboard-outline",
+        ["layout-swap"] = "swap-horizontal",
     };
 }

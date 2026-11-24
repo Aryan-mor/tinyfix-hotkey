@@ -35,6 +35,12 @@ public sealed class AppSettings
     /// <summary>Ask GitHub once a day whether a newer release exists.</summary>
     public bool CheckForUpdates { get; set; } = true;
 
+    /// <summary>Leave the text a skill replaced on the clipboard instead of restoring what the clipboard held before.</summary>
+    public bool KeepPreviousOnClipboard { get; set; } = true;
+
+    /// <summary>Show a short "changed" toast with an Undo button after a skill replaced text.</summary>
+    public bool ShowChangeToast { get; set; } = true;
+
     /// <summary>Date (yyyy-MM-dd) of the last update check.</summary>
     public string LastUpdateCheck { get; set; } = "";
 

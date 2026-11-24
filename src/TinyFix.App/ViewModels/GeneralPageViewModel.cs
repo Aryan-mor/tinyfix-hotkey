@@ -48,6 +48,8 @@ public sealed partial class GeneralPageViewModel : PageViewModel
         _selectedLanguage = Languages.FirstOrDefault(l => l.Code == _s.Store.Settings.Language) ?? Languages[0];
         _themeIndex = _s.Store.Settings.Theme switch { "light" => 1, "dark" => 2, _ => 0 };
         _autostart = _s.Platform.Autostart.IsEnabled;
+        _keepPrevious = _s.Store.Settings.KeepPreviousOnClipboard;
+        _changeToast = _s.Store.Settings.ShowChangeToast;
         PlatformNotice = _s.Platform.Capabilities.IsWayland ? _s.Loc["status.wayland"] : "";
         _loading = false;
         Track();
@@ -67,6 +69,30 @@ public sealed partial class GeneralPageViewModel : PageViewModel
     /// <summary>Whether TinyFix starts when the user logs in.</summary>
     [ObservableProperty]
     private bool _autostart;
+
+    /// <summary>Leave the replaced text on the clipboard.</summary>
+    [ObservableProperty]
+    private bool _keepPrevious;
+
+    /// <summary>Show the "changed" toast with Undo.</summary>
+    [ObservableProperty]
+    private bool _changeToast;
+
+    partial void OnKeepPreviousChanged(bool value)
+    {
+        if (_loading)
+            return;
+        _s.Store.Settings.KeepPreviousOnClipboard = value;
+        _s.Store.SaveSettings();
+    }
+
+    partial void OnChangeToastChanged(bool value)
+    {
+        if (_loading)
+            return;
+        _s.Store.Settings.ShowChangeToast = value;
+        _s.Store.SaveSettings();
+    }
 
     /// <summary>A note about the desktop (Wayland), or empty.</summary>
     public string PlatformNotice { get; }

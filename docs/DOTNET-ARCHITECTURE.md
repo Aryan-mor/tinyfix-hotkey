@@ -10,15 +10,21 @@ The project layout, the localization mechanism and several patterns are adapted 
 A tray app that fixes and rewrites the text you are typing in any other app. Select text (or let TinyFix select the whole
 field), press a shortcut, and the result replaces the selection.
 
-* Skills: **Fix**, **Fix all**, **Translate**, **Improve prompt** (and the optional **Rewrite** and **Rewrite to target
+* Skills: **Fix**, **Translate**, **Improve prompt** (and the optional **Rewrite** and **Rewrite to target
   language**), plus any number of custom skills (name, enabled, input mode, shortcut, prompt, model choice).
 * Every skill has a global shortcut. The **skill selector** (default `Ctrl+Alt+M`) is a donut (radial) menu that opens at the
   caret or, when Settings says so, the mouse pointer: press `1`-`9`, click a slice, `Tab` or the wheel turns the page when there are more than nine
   skills, `Esc` or a click outside cancels.
-* **Every skill goes through an AI model** (Google Gemini, OpenRouter, OpenAI, Anthropic, Ollama, LM Studio, or a custom
-  server, with a fallback model), in any language. There is **no other engine** in the C# app. With no usable model a skill shows the localized notice
+* **Every AI skill goes through an AI model** (Google Gemini, OpenRouter, OpenAI, Anthropic, Ollama, LM Studio, or a custom
+  server, with a fallback model), in any language. With no usable model such a skill shows the localized notice
   "Set up an AI model in Settings to use this skill."
-* Settings: General, Donut, Skills, AI models, Updates, About.
+* **Layout skills need no model and no network.** A layout conversion (`Skill.Kind` `layout` or `swap`) re-types text typed on the
+  wrong keyboard layout: each character goes back to its physical key and forward to the character that key gives on the other
+  layout (`TinyFix.Core.Layouts`). The layouts are read from the OS (`IKeyboardLayouts`; Windows asks `ToUnicodeEx` per key, so no
+  table is typed by hand; macOS and Linux have no adapter yet and say so). A rule is "from a language or any, to a language"; the
+  swap rule turns text of one of two languages into the other, in both directions. They use the same input modes, donut and shortcuts
+  as AI skills, and are off by default.
+* Settings: General, Donut, Skills, AI models, Cost, Updates, About.
 
 ## Projects
 

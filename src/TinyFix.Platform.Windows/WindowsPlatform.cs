@@ -17,5 +17,6 @@ public static class WindowsPlatform
         new DpapiSecretStore(dataDirectory),
         // Registered only when the user turns "start with Windows" on in Settings, never by the app on its own.
         new WindowsAutostart(),
-        new PlatformCapabilities(GlobalHotkeys: true, CaretPosition: true, RestoreForeground: true, IsWayland: false));
+        new PlatformCapabilities(GlobalHotkeys: true, CaretPosition: true, RestoreForeground: true, IsWayland: false),
+        new WindowsKeyboardLayouts());
 }

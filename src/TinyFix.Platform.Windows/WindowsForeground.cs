@@ -23,6 +23,9 @@ public sealed class WindowsForeground : IForegroundWindow
     }
 
     /// <inheritdoc />
+    public IFocusAnchor? SaveFocus() => WindowsFocusAnchor.Capture(this, Save());
+
+    /// <inheritdoc />
     public bool Restore(string? token)
     {
         if (!long.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value == 0)

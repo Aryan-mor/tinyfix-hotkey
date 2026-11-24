@@ -9,6 +9,7 @@ using Avalonia.Media;
 using TinyFix.App;
 using TinyFix.App.Services;
 using TinyFix.Core.Hotkeys;
+using TinyFix.Core.Layouts;
 using TinyFix.Core.Platform;
 using TinyFix.Core.Settings;
 
@@ -35,6 +36,18 @@ public static class TestAppBuilder
             .WithInterFont()
             .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
     }
+}
+
+/// <summary>An English and a Persian layout, so the layout settings have something to list.</summary>
+internal sealed class FakeLayouts : IKeyboardLayouts
+{
+    private static readonly KeyboardLayout[] Both =
+    [
+        new("en", "English (United States)", new Dictionary<int, char> { [0x1E] = 'a', [0x1F] = 's', [0x20] = 'd' }),
+        new("fa", "Persian (Iran)", new Dictionary<int, char> { [0x1E] = 'ش', [0x1F] = 'س', [0x20] = 'ی' }),
+    ];
+
+    public IReadOnlyList<KeyboardLayout> Installed() => Both;
 }
 
 /// <summary>Records shortcut registrations instead of installing a global hook.</summary>
@@ -109,6 +122,10 @@ internal sealed class FakePorts : IClipboardAccess, IKeySender, IForegroundWindo
     }
 
     public void SendSelectAll()
+    {
+    }
+
+    public void SendUndo()
     {
     }
 
@@ -198,7 +215,7 @@ internal static class TestServices
         var app = Application.Current!;
         if (!ReferenceEquals(_initializedFor, app))
         {
-            var platform = new PlatformServices(Ports, Ports, Ports, Ports, Ports, new PlatformCapabilities(true, true, true, wayland));
+            var platform = new PlatformServices(Ports, Ports, Ports, Ports, Ports, new PlatformCapabilities(true, true, true, wayland), new FakeLayouts());
             Environment.SetEnvironmentVariable(UserDataStore.LegacyVariable, Path.Combine(DataDirectory, "no-legacy"));
             AppHost.Build(DataDirectory, platform, Hotkeys, Ports, new HttpClientHandlerStub(), new NullLogProvider());
             AppHost.Services.Loc.Attach(app);

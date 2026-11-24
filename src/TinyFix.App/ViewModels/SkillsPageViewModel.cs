@@ -6,12 +6,16 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using TinyFix.App.Services;
+using TinyFix.Core.Layouts;
 using TinyFix.Core.Llm;
 using TinyFix.Core.Prompts;
 using TinyFix.Core.Settings;
 using TinyFix.Core.Skills;
 
 namespace TinyFix.App.ViewModels;
+
+/// <summary>One entry of a layout drop-down: a language code (or "any") and the text shown for it.</summary>
+public sealed record LayoutChoice(string Id, string Label);
 
 /// <summary>One row of the skill list.</summary>
 public sealed partial class SkillRowViewModel(Skill skill, AppServices services) : ObservableObject
@@ -31,8 +35,7 @@ public sealed partial class SkillRowViewModel(Skill skill, AppServices services)
             parts.Add(Skill.HotkeyValue().IsDisabled ? services.Loc["shortcut.none"] : Skill.DisplayHotkey());
             if (Skill.Builtin)
                 parts.Add(services.Loc["skills.builtin"]);
-            if (Skill.NeedsAi)
-                parts.Add(services.Loc["skills.needs_ai"]);
+            parts.Add(services.Loc[Skill.NeedsAi ? "skills.needs_ai" : "skills.kind_layout"]);
             return string.Join("  ·  ", parts);
         }
     }
@@ -101,8 +104,41 @@ public sealed partial class SkillsPageViewModel : PageViewModel
 
     /// <summary>The selected row, or null.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasSelection), nameof(CanDelete), nameof(IsCustomModel))]
+    [NotifyPropertyChangedFor(nameof(HasSelection), nameof(CanDelete), nameof(IsCustomModel), nameof(IsAiSkill), nameof(IsLayoutSkill),
+        nameof(IsSwapSkill), nameof(FromLabel), nameof(ToLabel), nameof(LayoutHelp))]
     private SkillRowViewModel? _selected;
+
+    /// <summary>The layout the text was typed on (first language of a swap).</summary>
+    [ObservableProperty]
+    private LayoutChoice? _layoutFromChoice;
+
+    /// <summary>The layout to convert to (second language of a swap).</summary>
+    [ObservableProperty]
+    private LayoutChoice? _layoutToChoice;
+
+    /// <summary>The "typed on" choices: every installed layout, plus "any language" for a conversion.</summary>
+    public ObservableCollection<LayoutChoice> FromChoices { get; } = [];
+
+    /// <summary>The "convert to" choices: every installed layout.</summary>
+    public ObservableCollection<LayoutChoice> ToChoices { get; } = [];
+
+    /// <summary>True when the selected skill goes through an AI model (shows the model and prompt fields).</summary>
+    public bool IsAiSkill => Selected is { } row && row.Skill.NeedsAi;
+
+    /// <summary>True when the selected skill converts between keyboard layouts.</summary>
+    public bool IsLayoutSkill => Selected is { } row && row.Skill.IsLayout;
+
+    /// <summary>True when the selected skill swaps two languages.</summary>
+    public bool IsSwapSkill => Selected is { } row && row.Skill.Kind == SkillKinds.Swap;
+
+    /// <summary>Label of the first layout drop-down.</summary>
+    public string FromLabel => _s.Loc[IsSwapSkill ? "skills.layout_a" : "skills.layout_from"];
+
+    /// <summary>Label of the second layout drop-down.</summary>
+    public string ToLabel => _s.Loc[IsSwapSkill ? "skills.layout_b" : "skills.layout_to"];
+
+    /// <summary>One sentence about what a layout skill does.</summary>
+    public string LayoutHelp => _s.Loc[IsSwapSkill ? "skills.layout_swap_help" : "skills.layout_help"];
 
     /// <summary>Text about shortcut conflicts, or empty.</summary>
     [ObservableProperty]
@@ -146,7 +182,7 @@ public sealed partial class SkillsPageViewModel : PageViewModel
             var skill = row.Skill;
             Name = SkillNames.Display(skill, _s.Loc);
             Enabled = skill.Enabled;
-            InputIndex = skill.SelectAll ? 1 : 0;
+            InputIndex = skill.Auto ? 0 : skill.SelectAll ? 2 : 1;
             Shortcut = skill.Hotkey;
             ModelModeIndex = Math.Max(0, Array.IndexOf(ModelModeIds, skill.ModelMode));
             var mainSlot = LlmSecrets.SkillMain(skill.Id);
@@ -168,8 +204,83 @@ public sealed partial class SkillsPageViewModel : PageViewModel
                 Timeout = skill.ModelFallbackTimeout,
             }, use: HasEndpoint(skill.ModelFallbackProvider, skill.ModelFallback, skill.ModelFallbackBaseUrl));
             Prompt = skill.Prompt;
+            LoadLayoutChoices(skill);
         }
         _loading = false;
+    }
+
+    private IReadOnlyList<KeyboardLayout> InstalledLayouts() => _s.Platform.Layouts?.Installed() ?? [];
+
+    private string ShortLayout(string id) => id == LayoutConverter.Any ? _s.Loc["skills.layout_any"] : id.ToUpperInvariant();
+
+    private LayoutChoice Describe(string id, IReadOnlyList<KeyboardLayout> installed)
+    {
+        if (id == LayoutConverter.Any)
+            return new LayoutChoice(id, _s.Loc["skills.layout_any"]);
+        return LayoutConverter.Find(installed, id) is { } layout
+            ? new LayoutChoice(id, $"{layout.Name} ({layout.Language.ToUpperInvariant()})")
+            : new LayoutChoice(id, _s.Loc.Format("skills.layout_missing", id.ToUpperInvariant()));
+    }
+
+    private void LoadLayoutChoices(Skill skill)
+    {
+        var installed = InstalledLayouts();
+        FromChoices.Clear();
+        ToChoices.Clear();
+        if (skill.Kind == SkillKinds.Layout)
+            FromChoices.Add(Describe(LayoutConverter.Any, installed));
+        foreach (var layout in installed)
+        {
+            FromChoices.Add(Describe(layout.Language, installed));
+            ToChoices.Add(Describe(layout.Language, installed));
+        }
+        // A layout the rule names but this machine does not have stays visible (marked "not installed") instead of vanishing.
+        if (FromChoices.All(c => c.Id != skill.LayoutFrom))
+            FromChoices.Add(Describe(skill.LayoutFrom, installed));
+        if (ToChoices.All(c => c.Id != skill.LayoutTo))
+            ToChoices.Add(Describe(skill.LayoutTo, installed));
+        var from = skill.LayoutFrom;
+        var to = skill.LayoutTo;
+        // A swap whose pair is not installed, on a machine with exactly two layouts, shows (and runs) those two.
+        if (skill.Kind == SkillKinds.Swap && LayoutConverter.ResolvePair(from, to, installed) is var (a, b))
+            (from, to) = (a.Language, b.Language);
+        LayoutFromChoice = FromChoices.First(c => c.Id == from);
+        LayoutToChoice = ToChoices.First(c => c.Id == to);
+    }
+
+    /// <summary>The name a layout skill gets from its two choices.</summary>
+    private string AutoName(Skill skill) => skill.Kind == SkillKinds.Swap
+        ? _s.Loc.Format("skills.layout_swap_name", ShortLayout(skill.LayoutFrom), ShortLayout(skill.LayoutTo))
+        : _s.Loc.Format("skills.layout_name", ShortLayout(skill.LayoutFrom), ShortLayout(skill.LayoutTo));
+
+    private void ChangeLayout(Action<Skill> change)
+    {
+        if (_loading || Selected is not { } row)
+            return;
+        var skill = row.Skill;
+        // A name nobody typed follows the choice ("Any to FA" becomes "EN to FA"); a name the user wrote stays.
+        var follows = skill.Name == AutoName(skill) || SkillNames.IsDefaultName(skill);
+        change(skill);
+        if (follows)
+        {
+            skill.Name = AutoName(skill);
+            _loading = true;
+            Name = skill.Name;
+            _loading = false;
+        }
+        Edit(_ => { });
+    }
+
+    partial void OnLayoutFromChoiceChanged(LayoutChoice? value)
+    {
+        if (value is not null)
+            ChangeLayout(skill => skill.LayoutFrom = value.Id);
+    }
+
+    partial void OnLayoutToChoiceChanged(LayoutChoice? value)
+    {
+        if (value is not null)
+            ChangeLayout(skill => skill.LayoutTo = value.Id);
     }
 
     partial void OnNameChanged(string value) => Edit(skill =>
@@ -181,7 +292,12 @@ public sealed partial class SkillsPageViewModel : PageViewModel
 
     partial void OnEnabledChanged(bool value) => Edit(skill => skill.Enabled = value);
 
-    partial void OnInputIndexChanged(int value) => Edit(skill => skill.InputMode = value == 1 ? InputModes.SelectAll : InputModes.Selection);
+    partial void OnInputIndexChanged(int value) => Edit(skill => skill.InputMode = value switch
+    {
+        0 => InputModes.Auto,
+        2 => InputModes.SelectAll,
+        _ => InputModes.Selection,
+    });
 
     partial void OnShortcutChanged(string value) => Edit(skill => skill.Hotkey = value);
 
@@ -262,6 +378,21 @@ public sealed partial class SkillsPageViewModel : PageViewModel
     private void Add()
     {
         var skill = SkillCatalog.NewCustomSkill(_s.Loc["skills.new_name"]);
+        _s.Store.Skills.Skills.Add(skill);
+        var row = new SkillRowViewModel(skill, _s);
+        Rows.Add(row);
+        Selected = row;
+        Flush();
+    }
+
+    /// <summary>Adds a layout conversion (any language to Persian when that layout is installed) and selects it.</summary>
+    [RelayCommand]
+    private void AddLayout()
+    {
+        var installed = InstalledLayouts();
+        var to = LayoutConverter.Find(installed, "fa")?.Language ?? installed.FirstOrDefault()?.Language ?? "fa";
+        var skill = SkillCatalog.NewLayoutSkill("", LayoutConverter.Any, to);
+        skill.Name = AutoName(skill);
         _s.Store.Skills.Skills.Add(skill);
         var row = new SkillRowViewModel(skill, _s);
         Rows.Add(row);

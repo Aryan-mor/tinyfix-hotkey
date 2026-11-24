@@ -67,6 +67,9 @@ public static class SkillStoreFile
             Id = id,
             Name = Or(GetString(item, "name", null), "New skill"),
             InputMode = Or(GetString(item, "input_mode", null), InputModes.Selection),
+            Kind = GetString(item, "kind", null) ?? SkillKinds.Ai,
+            LayoutFrom = GetString(item, "layout_from", null) ?? "any",
+            LayoutTo = GetString(item, "layout_to", null) ?? "fa",
             Prompt = GetString(item, "prompt", null) ?? PromptRenderer.DefaultCustomPrompt,
             Hotkey = GetString(item, "hotkey", null) ?? "none",
             Enabled = GetBool(item, "enabled", true),
@@ -119,6 +122,9 @@ public static class SkillStoreFile
                 w.WriteString("id", s.Id);
                 w.WriteString("name", s.Name);
                 w.WriteString("input_mode", s.InputMode);
+                w.WriteString("kind", s.Kind);
+                w.WriteString("layout_from", s.LayoutFrom);
+                w.WriteString("layout_to", s.LayoutTo);
                 w.WriteString("prompt", s.Prompt);
                 w.WriteString("hotkey", s.Hotkey);
                 w.WriteBoolean("enabled", s.Enabled);

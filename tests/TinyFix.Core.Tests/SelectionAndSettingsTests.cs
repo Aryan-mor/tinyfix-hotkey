@@ -51,11 +51,15 @@ internal sealed class FakeClipboard : IClipboardAccess, IKeySender, IForegroundW
 
     public void Clear() => Text = null;
 
+    private int _copies;
+
     public void SendCopy()
     {
         Log.Add("copy");
-        if (Selection is not null)
-            SetText(Selection);
+        _copies++;
+        var current = _copies > 1 && SelectionAfterClick is not null ? SelectionAfterClick : Selection;
+        if (current is not null)
+            SetText(current);
     }
 
     public void SendPaste()
@@ -66,7 +70,17 @@ internal sealed class FakeClipboard : IClipboardAccess, IKeySender, IForegroundW
 
     public void SendSelectAll() => Log.Add("selectall");
 
+    public void SendUndo() => Log.Add("undo");
+
     public string? Save() => "w1";
+
+    /// <summary>What the app really has selected when the check copies; null: the same as <see cref="Selection"/>.</summary>
+    public IFocusAnchor? Anchor { get; set; }
+
+    /// <summary>After the first copy the "user clicks elsewhere": later copies give this text instead.</summary>
+    public string? SelectionAfterClick { get; set; }
+
+    public IFocusAnchor? SaveFocus() => Anchor;
 
     public bool Restore(string? token)
     {
@@ -113,6 +127,13 @@ internal sealed class FakeSecrets : ISecretStore
 internal sealed class RecordingStatus : IStatusSink
 {
     public List<string> Keys { get; } = [];
+    public Func<Task>? Undo { get; private set; }
+
+    public void ShowUndo(string key, Func<Task> undo, params object[] args)
+    {
+        Keys.Add(key);
+        Undo = undo;
+    }
 
     public void Show(StatusKind kind, string key, params object[] args) => Keys.Add(key);
 
@@ -193,6 +214,7 @@ public sealed class SelectionAndSettingsTests : IDisposable
         var fake = new FakeClipboard { Selection = "Hi frinds, i hope" };
         var status = new RecordingStatus();
         var store = NewStore();
+        store.Settings.KeepPreviousOnClipboard = false;
         var runner = OnlineRunner(fake, status, store, "Hi friends, I hope");
         await runner.RunAsync(store.Skills.Get(SkillIds.Fix)!, "w1", Ct);
         Assert.Equal("Hi friends, I hope", fake.PastedOver);
@@ -201,10 +223,117 @@ public sealed class SelectionAndSettingsTests : IDisposable
     }
 
     [Fact]
+    public async Task The_replaced_text_stays_on_the_clipboard_by_default_and_a_toast_offers_undo()
+    {
+        var fake = new FakeClipboard { Selection = "Hi frinds" };
+        var status = new RecordingStatus();
+        var store = NewStore();
+        Assert.True(store.Settings.KeepPreviousOnClipboard);
+        Assert.True(store.Settings.ShowChangeToast);
+        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(store.Skills.Get(SkillIds.Fix)!, "w1", Ct);
+        Assert.Equal("Hi friends", fake.PastedOver);
+        Assert.Equal("Hi frinds", fake.Text);
+        Assert.Contains("status.changed", status.Keys);
+        Assert.NotNull(status.Undo);
+    }
+
+    [Fact]
+    public async Task The_changed_toast_can_be_turned_off()
+    {
+        var fake = new FakeClipboard { Selection = "Hi frinds" };
+        var status = new RecordingStatus();
+        var store = NewStore();
+        store.Settings.ShowChangeToast = false;
+        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(store.Skills.Get(SkillIds.Fix)!, "w1", Ct);
+        Assert.Equal("Hi friends", fake.PastedOver);
+        Assert.DoesNotContain("status.changed", status.Keys);
+        Assert.Null(status.Undo);
+    }
+
+    [Fact]
+    public async Task Undo_without_an_anchor_brings_the_window_back_and_sends_undo()
+    {
+        var fake = new FakeClipboard { Selection = "Hi frinds" };
+        var status = new RecordingStatus();
+        var store = NewStore();
+        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(store.Skills.Get(SkillIds.Fix)!, "w1", Ct);
+        fake.Log.Clear();
+        await status.Undo!();
+        Assert.Equal(["focus:w1", "undo"], fake.Log.Where(l => l != "restore").ToArray());
+        Assert.Contains("status.undone", status.Keys);
+        Assert.Equal("Hi frinds", fake.Text);
+    }
+
+    [Fact]
+    public async Task A_selection_that_moved_while_the_model_worked_is_never_pasted_over()
+    {
+        var fake = new FakeClipboard { Selection = "Hi frinds", SelectionAfterClick = "something else the user clicked" };
+        var status = new RecordingStatus();
+        var store = NewStore();
+        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(store.Skills.Get(SkillIds.Fix)!, "w1", Ct);
+        Assert.Null(fake.PastedOver);
+        Assert.Equal("Hi friends", fake.Text);
+        Assert.Contains("status.moved", status.Keys);
+        Assert.Null(status.Undo);
+    }
+
+    private static Skill WholeField(UserDataStore store)
+    {
+        var skill = store.Skills.Get(SkillIds.Fix)!;
+        skill.InputMode = InputModes.SelectAll;
+        return skill;
+    }
+
+    [Fact]
+    public async Task A_whole_field_skill_selects_all_again_before_it_pastes()
+    {
+        var fake = new FakeClipboard { Selection = "Hi frinds" };
+        var status = new RecordingStatus();
+        var store = NewStore();
+        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(WholeField(store), "w1", Ct);
+        Assert.Equal(2, fake.Log.Count(l => l == "selectall"));
+        Assert.True(fake.Log.LastIndexOf("selectall") < fake.Log.IndexOf("paste"));
+        Assert.Equal("Hi friends", fake.PastedOver);
+    }
+
+    private sealed class FakeAnchor(FakeClipboard owner, bool exact) : IFocusAnchor
+    {
+        public bool Restored { get; private set; }
+
+        public bool Restore()
+        {
+            Restored = true;
+            owner.Log.Add("anchor");
+            return exact;
+        }
+
+        public IFocusAnchor? AfterPaste() => this;
+    }
+
+    [Fact]
+    public async Task An_exact_anchor_replaces_the_pasted_range_on_undo_without_sending_select_all_or_undo()
+    {
+        var fake = new FakeClipboard { Selection = "Hi frinds" };
+        var anchor = new FakeAnchor(fake, exact: true);
+        fake.Anchor = anchor;
+        var status = new RecordingStatus();
+        var store = NewStore();
+        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(WholeField(store), "w1", Ct);
+        Assert.True(anchor.Restored);
+        Assert.Equal(1, fake.Log.Count(l => l == "selectall"));
+        fake.Log.Clear();
+        fake.Selection = "Hi friends";
+        await status.Undo!();
+        Assert.Contains("anchor", fake.Log);
+        Assert.DoesNotContain("undo", fake.Log);
+        Assert.Equal("Hi frinds", fake.PastedOver);
+    }
+
+    [Fact]
     public async Task Every_skill_says_so_when_ai_is_off()
     {
         var store = NewStore();
-        foreach (var id in new[] { SkillIds.Fix, SkillIds.FixAll, SkillIds.Translate })
+        foreach (var id in new[] { SkillIds.Fix, SkillIds.Translate })
         {
             var fake = new FakeClipboard { Selection = "Hello" };
             var status = new RecordingStatus();

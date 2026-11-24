@@ -19,6 +19,7 @@
       <DockPanel Grid.Column="0">
         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
           <Button Content="{DynamicResource skills.add}" Command="{Binding AddCommand}" Classes="accent" Margin="0,0,6,6" />
+          <Button Content="{DynamicResource skills.add_layout}" Command="{Binding AddLayoutCommand}" Margin="0,0,6,6" />
           <Button Content="{DynamicResource skills.duplicate}" Command="{Binding DuplicateCommand}" IsEnabled="{Binding HasSelection}" Margin="0,0,6,6" />
           <Button Content="{DynamicResource skills.delete}" Command="{Binding DeleteCommand}" IsEnabled="{Binding CanDelete}" Margin="0,0,6,6" />
           <Button Content="{DynamicResource skills.move_up}" Command="{Binding MoveUpCommand}" IsEnabled="{Binding HasSelection}" Margin="0,0,6,6" />
@@ -46,6 +47,7 @@
             <StackPanel>
               <TextBlock Text="{DynamicResource skills.input_mode}" Classes="label" />
               <ComboBox SelectedIndex="{Binding InputIndex}" MinWidth="280">
+                <ComboBoxItem Content="{DynamicResource skills.mode_auto}" />
                 <ComboBoxItem Content="{DynamicResource skills.mode_selection}" />
                 <ComboBoxItem Content="{DynamicResource skills.mode_all}" />
               </ComboBox>
@@ -54,6 +56,30 @@
               <TextBlock Text="{DynamicResource skills.shortcut}" Classes="label" />
               <c:ShortcutRecorder Value="{Binding Shortcut}" />
             </StackPanel>
+            <StackPanel Spacing="14" IsVisible="{Binding IsLayoutSkill}">
+              <TextBlock Text="{Binding LayoutHelp}" Classes="caption" TextWrapping="Wrap" />
+              <StackPanel>
+                <TextBlock Text="{Binding FromLabel}" Classes="label" />
+                <ComboBox ItemsSource="{Binding FromChoices}" SelectedItem="{Binding LayoutFromChoice}" MinWidth="280">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:LayoutChoice">
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel>
+                <TextBlock Text="{Binding ToLabel}" Classes="label" />
+                <ComboBox ItemsSource="{Binding ToChoices}" SelectedItem="{Binding LayoutToChoice}" MinWidth="280">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:LayoutChoice">
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </StackPanel>
+            </StackPanel>
+            <StackPanel Spacing="14" IsVisible="{Binding IsAiSkill}">
             <StackPanel>
               <TextBlock Text="{DynamicResource skills.model}" Classes="label" />
               <ComboBox SelectedIndex="{Binding ModelModeIndex}" MinWidth="280">
@@ -71,6 +97,7 @@
               <TextBox Text="{Binding Prompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="170" MaxHeight="320" FontFamily="Consolas, Menlo, monospace" />
               <TextBlock Text="{Binding VariableHint}" Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap" />
               <Button Content="{DynamicResource skills.reset_prompt}" Command="{Binding ResetPromptCommand}" Margin="0,8,0,0" />
+            </StackPanel>
             </StackPanel>
           </StackPanel>
         </Border>

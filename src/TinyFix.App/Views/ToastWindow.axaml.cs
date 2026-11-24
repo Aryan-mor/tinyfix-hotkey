@@ -26,16 +26,34 @@ public partial class ToastWindow : Window
     /// <summary>The text on screen.</summary>
     public string Text => Message.Text ?? "";
 
-    /// <summary>Shows <paramref name="text"/>; a failure gets a red outline.</summary>
-    public void Display(string text, bool failure)
+    private Action? _undo;
+
+    /// <summary>
+    /// Shows <paramref name="text"/>; a failure gets a red outline. With <paramref name="undo"/> the toast also has a
+    /// button labelled <paramref name="undoLabel"/> and stays for three seconds.
+    /// </summary>
+    public void Display(string text, bool failure, string? undoLabel = null, Action? undo = null)
     {
         Message.Text = text;
+        _undo = undo;
+        UndoButton.IsVisible = undo is not null;
+        UndoButton.Content = undoLabel;
+        _hide.Interval = undo is null ? TimeSpan.FromSeconds(3.2) : TimeSpan.FromSeconds(3);
         Card.BorderBrush = Resource(failure ? "DangerBrush" : "SubtleBorderBrush");
         if (!IsVisible)
             Show();
         Dispatcher.UIThread.Post(Reposition, DispatcherPriority.Loaded);
         _hide.Stop();
         _hide.Start();
+    }
+
+    private void OnUndo(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var undo = _undo;
+        _undo = null;
+        _hide.Stop();
+        Hide();
+        undo?.Invoke();
     }
 
     private Avalonia.Media.IBrush? Resource(string key) =>
