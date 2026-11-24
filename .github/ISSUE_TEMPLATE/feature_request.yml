@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a new skill, setting or behaviour.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation and what gets in your way today. This matters more than the solution.
+      placeholder: "When I write in Slack I often want to..."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you imagine it working. A sketch or screenshot is welcome.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you tried instead?
+      description: For example a custom skill with your own prompt, or another tool.
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to open a pull request for this (see CONTRIBUTING.md).

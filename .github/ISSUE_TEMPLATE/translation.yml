@@ -1,0 +1,32 @@
+name: Translation
+description: Fix a wrong or clumsy translation, or ask for a new language.
+labels: [translation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        TinyFix's translations are machine-made, so native-speaker corrections are very welcome.
+        You can also edit `src/TinyFix.App/Assets/i18n/<language>.json` directly and open a pull request.
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - German (de)
+        - Persian (fa)
+        - Japanese (ja)
+        - English (en)
+        - A new language
+    validations:
+      required: true
+  - type: textarea
+    id: fixes
+    attributes:
+      label: What should change?
+      description: Where you saw the text (window and page), what it says now, and what it should say.
+      placeholder: |
+        Settings → Skills, the "Input" label
+        Now: ...
+        Better: ...
+    validations:
+      required: true
