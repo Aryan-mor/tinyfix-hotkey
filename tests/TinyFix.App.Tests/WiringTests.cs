@@ -27,7 +27,6 @@ public class WiringTests
         AppHost.ApplyHotkeys();
         var ids = TestServices.Hotkeys.Bindings.ToDictionary(b => b.Id, b => b.Key.Display);
         Assert.Equal("Ctrl+Alt+Space", ids[SkillIds.Fix]);
-        Assert.Equal("Ctrl+F3", ids[SkillIds.FixAll]);
         Assert.Equal("Ctrl+Alt+T", ids[SkillIds.Translate]);
         Assert.Equal("Ctrl+Alt+M", ids[HotkeyIds.Menu]);
         // Skills without a shortcut and disabled skills are not registered.

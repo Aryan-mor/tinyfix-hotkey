@@ -23,7 +23,7 @@ public static class SkillIds
     public static IReadOnlyList<string> Builtin { get; } = [Fix, FixAll, Translate, Rewrite, RewriteLanguage, ImprovePrompt, LayoutAnyFa, LayoutSwap];
 
     /// <summary>Built-ins that can only be turned off: the app's fallback and old settings rely on them.</summary>
-    public static IReadOnlyList<string> CoreBuiltin { get; } = [Fix, FixAll, Translate];
+    public static IReadOnlyList<string> CoreBuiltin { get; } = [Fix, Translate];
 
     /// <summary>Built-ins a user may delete; a deleted one is not added back on the next start.</summary>
     public static IReadOnlyList<string> OptionalBuiltin { get; } = [Rewrite, RewriteLanguage, ImprovePrompt, LayoutAnyFa, LayoutSwap];

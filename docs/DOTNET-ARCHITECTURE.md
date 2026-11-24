@@ -10,7 +10,7 @@ The project layout, the localization mechanism and several patterns are adapted 
 A tray app that fixes and rewrites the text you are typing in any other app. Select text (or let TinyFix select the whole
 field), press a shortcut, and the result replaces the selection.
 
-* Skills: **Fix**, **Fix all**, **Translate**, **Improve prompt** (and the optional **Rewrite** and **Rewrite to target
+* Skills: **Fix**, **Translate**, **Improve prompt** (and the optional **Rewrite** and **Rewrite to target
   language**), plus any number of custom skills (name, enabled, input mode, shortcut, prompt, model choice).
 * Every skill has a global shortcut. The **skill selector** (default `Ctrl+Alt+M`) is a donut (radial) menu that opens at the
   caret or, when Settings says so, the mouse pointer: press `1`-`9`, click a slice, `Tab` or the wheel turns the page when there are more than nine

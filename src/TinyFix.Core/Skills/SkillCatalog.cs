@@ -38,21 +38,20 @@ public static class SkillCatalog
             "Translate the text below into German. Keep the meaning, tone, and line breaks. Return only the translation.\n\n{{content}}\n"),
     ];
 
-    /// <summary>The six built-in skills in their default order.</summary>
+    /// <summary>The built-in skills in their default order.</summary>
     public static List<Skill> DefaultSkills(LegacySkillOptions? legacy = null)
     {
         legacy ??= new LegacySkillOptions();
         return
         [
             Make(SkillIds.Fix, "Fix", InputModes.Auto, Or(legacy.FixPrompt, DefaultPrompts.Fix), legacy.FixHotkey, HotkeyDefaults.Fix, true),
-            Make(SkillIds.FixAll, "Fix all", InputModes.Auto, Or(legacy.FixPrompt, DefaultPrompts.Fix), legacy.FixAllHotkey, HotkeyDefaults.FixAll, true),
-            Make(SkillIds.Translate, "Translate", legacy.TranslateSelectAll ? InputModes.SelectAll : InputModes.Auto,
+            Make(SkillIds.Translate, "Translate", InputModes.Auto,
                 Or(legacy.TranslatePrompt, DefaultPrompts.Translate), legacy.TranslateHotkey, HotkeyDefaults.Translate, true),
             Make(SkillIds.Rewrite, "Rewrite", InputModes.Auto, DefaultPrompts.Rewrite, "none", "none", false),
             Make(SkillIds.RewriteLanguage, "Rewrite to target language", InputModes.Auto, DefaultPrompts.RewriteLanguage, "none", "none", false),
             Make(SkillIds.ImprovePrompt, "Improve prompt", InputModes.Auto, DefaultPrompts.ImprovePrompt, "none", "none", true, ModelModes.Better),
             MakeLayout(SkillIds.LayoutAnyFa, "Any language to FA", SkillKinds.Layout, "any", "fa", InputModes.Auto, "none"),
-            MakeLayout(SkillIds.LayoutSwap, "Swap two languages", SkillKinds.Swap, "en", "fa", InputModes.Selection, HotkeyDefaults.Swap),
+            MakeLayout(SkillIds.LayoutSwap, "Swap two languages", SkillKinds.Swap, "en", "fa", InputModes.Auto, HotkeyDefaults.Swap),
         ];
     }
 
@@ -166,7 +165,7 @@ public static class SkillCatalog
         return copy.Normalize();
     }
 
-    /// <summary>Fix, Fix all and Translate can only be turned off.</summary>
+    /// <summary>Fix and Translate can only be turned off.</summary>
     public static bool CanDelete(Skill skill) => !SkillIds.CoreBuiltin.Contains(skill.Id);
 
     /// <summary>Removes a skill (remembering a deleted optional built-in). False when it may not be deleted.</summary>
@@ -237,12 +236,10 @@ public static class SkillCatalog
     {
         var defaults = DefaultSkills();
         var fix = store.Get(SkillIds.Fix) ?? defaults[0];
-        var fixAll = store.Get(SkillIds.FixAll) ?? defaults[1];
-        var translate = store.Get(SkillIds.Translate) ?? defaults[2];
+        var translate = store.Get(SkillIds.Translate) ?? defaults[1];
         return new LegacySkillOptions
         {
             FixHotkey = fix.Hotkey,
-            FixAllHotkey = fixAll.Hotkey,
             TranslateHotkey = translate.Hotkey,
             TranslateSelectAll = translate.SelectAll,
             FixPrompt = fix.Prompt,

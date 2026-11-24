@@ -279,7 +279,7 @@ public sealed class SelectionAndSettingsTests : IDisposable
 
     private static Skill WholeField(UserDataStore store)
     {
-        var skill = store.Skills.Get(SkillIds.FixAll)!;
+        var skill = store.Skills.Get(SkillIds.Fix)!;
         skill.InputMode = InputModes.SelectAll;
         return skill;
     }
@@ -333,7 +333,7 @@ public sealed class SelectionAndSettingsTests : IDisposable
     public async Task Every_skill_says_so_when_ai_is_off()
     {
         var store = NewStore();
-        foreach (var id in new[] { SkillIds.Fix, SkillIds.FixAll, SkillIds.Translate })
+        foreach (var id in new[] { SkillIds.Fix, SkillIds.Translate })
         {
             var fake = new FakeClipboard { Selection = "Hello" };
             var status = new RecordingStatus();

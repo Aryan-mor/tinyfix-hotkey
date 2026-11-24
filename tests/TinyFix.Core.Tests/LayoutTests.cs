@@ -119,7 +119,7 @@ public sealed class LayoutTests
         Assert.Equal(SkillKinds.Swap, swap.Kind);
         Assert.Equal("Ctrl+Alt+L", swap.Hotkey);
         Assert.True(swap.HotkeyValue().IsDisabled == false && any.HotkeyValue().IsDisabled);
-        Assert.Equal(InputModes.Selection, swap.InputMode);
+        Assert.Equal(InputModes.Auto, swap.InputMode);
         Assert.Equal(InputModes.Auto, any.InputMode);
         Assert.Empty(SkillCatalog.FindConflicts(SkillCatalog.DefaultSkills().Select(s => { s.Enabled = true; return s; }), HotkeyDefaults.Menu));
         Assert.Equal(("en", "fa"), (swap.LayoutFrom, swap.LayoutTo));

@@ -27,9 +27,9 @@ public class DonutTests
     {
         var s = TestServices.EnsureInitialized("en");
         var vm = new DonutViewModel(DefaultEnabled(), s.Loc, _ => true);
-        Assert.Equal(["Fix", "Fix all", "Translate", "Improve prompt"], vm.Slices.Select(x => x.Label));
+        Assert.Equal(["Fix", "Translate", "Improve prompt"], vm.Slices.Select(x => x.Label));
         Assert.Equal("Ctrl+Alt+Space", vm.Slices[0].Caption);
-        Assert.Null(vm.Slices[3].Caption);
+        Assert.Null(vm.Slices[2].Caption);
         Assert.Equal(1, vm.PageCount);
         Assert.Equal("", vm.AiHint);
     }
@@ -41,8 +41,8 @@ public class DonutTests
         var skills = DefaultEnabled();
         skills.Add(SkillCatalog.NewCustomSkill("Fix"));
         var vm = new DonutViewModel(skills, s.Loc, _ => true);
-        Assert.Equal("Alles korrigieren", vm.Slices[1].Label);
-        Assert.Equal("Fix", vm.Slices[4].Label);
+        Assert.Equal("Übersetzen", vm.Slices[1].Label);
+        Assert.Equal("Fix", vm.Slices[3].Label);
         TestServices.EnsureInitialized("en");
     }
 
@@ -61,7 +61,7 @@ public class DonutTests
         ready.Completed += r => result = r;
         Assert.True(ready.Choose(0));
         Assert.Equal(0, result);
-        vm.Hover = 2;
+        vm.Hover = 1;
         Assert.Equal("Translate", vm.CenterTitle);
         Assert.Equal(s.Loc["donut.needs_ai"], vm.CenterSubtitle);
     }

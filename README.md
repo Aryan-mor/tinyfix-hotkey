@@ -20,7 +20,6 @@ Fix the text you are typing in any app: select it, press a shortcut, and the cor
 | Action | Shortcut |
 | --- | --- |
 | Fix | Ctrl+Alt+Space |
-| Fix all | Ctrl+F3 |
 | Translate | Ctrl+Alt+T |
 | Donut menu | Ctrl+Alt+M |
 

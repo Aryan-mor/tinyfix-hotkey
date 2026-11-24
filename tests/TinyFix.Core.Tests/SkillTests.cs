@@ -19,15 +19,15 @@ public sealed class SkillTests : IDisposable
     public void Default_skills_include_fix_translate_and_rewrite()
     {
         var skills = SkillCatalog.DefaultSkills();
-        Assert.Equal(["fix", "fix-all", "translate", "rewrite", "rewrite-language", "improve-prompt", "layout-any-fa", "layout-swap"], skills.Select(s => s.Id));
+        Assert.Equal(["fix", "translate", "rewrite", "rewrite-language", "improve-prompt", "layout-any-fa", "layout-swap"], skills.Select(s => s.Id));
         Assert.Equal("Ctrl+Alt+Space", skills[0].Hotkey);
-        Assert.Equal("Ctrl+F3", skills[1].Hotkey);
+        Assert.True(skills[0].Auto);
+        Assert.Equal("Ctrl+Alt+T", skills[1].Hotkey);
         Assert.True(skills[1].Auto);
-        Assert.Equal("Ctrl+Alt+T", skills[2].Hotkey);
-        Assert.True(skills[0].OfflineFallback && skills[1].OfflineFallback);
-        Assert.False(skills[2].OfflineFallback);
-        Assert.False(skills[3].Enabled);
-        Assert.Equal(ModelModes.Better, skills[5].ModelMode);
+        Assert.True(skills[0].OfflineFallback);
+        Assert.False(skills[1].OfflineFallback);
+        Assert.False(skills[2].Enabled);
+        Assert.Equal(ModelModes.Better, skills[4].ModelMode);
     }
 
     [Fact]
@@ -37,7 +37,6 @@ public sealed class SkillTests : IDisposable
         var (store, created) = SkillStoreFile.Load(path, new LegacySkillOptions
         {
             FixHotkey = "F3",
-            FixAllHotkey = "none",
             TranslateHotkey = "Ctrl+Alt+T",
             TranslateSelectAll = true,
             FixPrompt = "Fix this: {{content}}",
@@ -45,8 +44,8 @@ public sealed class SkillTests : IDisposable
         });
         Assert.True(created);
         Assert.Equal("F3", store.Get(SkillIds.Fix)!.HotkeyValue().Display);
-        Assert.True(store.Get(SkillIds.FixAll)!.HotkeyValue().IsDisabled);
-        Assert.True(store.Get(SkillIds.Translate)!.SelectAll);
+        Assert.Null(store.Get(SkillIds.FixAll));
+        Assert.True(store.Get(SkillIds.Translate)!.Auto);
         Assert.Equal("Fix this: {{content}}", store.Get(SkillIds.Fix)!.Prompt);
         Assert.Contains("To {{language}}", store.Get(SkillIds.Translate)!.Prompt);
         Assert.False(store.Get(SkillIds.Rewrite)!.Enabled);
@@ -113,7 +112,7 @@ public sealed class SkillTests : IDisposable
         // A dismissed optional built-in is not added back, but missing core ones are.
         Assert.Null(store.Get(SkillIds.Rewrite));
         Assert.NotNull(store.Get(SkillIds.Translate));
-        Assert.Equal(SkillIds.Translate, store.Skills[1].Id);
+        Assert.Equal(SkillIds.Translate, store.Skills[0].Id);
     }
 
     [Fact]
@@ -151,12 +150,12 @@ public sealed class SkillTests : IDisposable
         Assert.Equal("Ctrl+Alt+M", single.Hotkey);
 
         skills[0].Hotkey = HotkeyDefaults.Fix;
-        skills[2].Hotkey = HotkeyDefaults.Fix;
+        skills[1].Hotkey = HotkeyDefaults.Fix;
         conflicts = SkillCatalog.FindConflicts(skills, HotkeyDefaults.Menu);
         Assert.Contains(conflicts, c => c.Hotkey == HotkeyParser.Parse(HotkeyDefaults.Fix).Display);
         Assert.Contains(conflicts, c => c.Left == "Fix" && c.Right == "Translate");
 
-        skills[2].Enabled = false;
+        skills[1].Enabled = false;
         Assert.Empty(SkillCatalog.FindConflicts(skills, HotkeyDefaults.Menu));
 
         skills[2].Enabled = true;
