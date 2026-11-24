@@ -22,11 +22,12 @@ public enum SelectionFailure
     Empty,
 }
 
-/// <summary>The result of <see cref="SelectionService.CaptureAsync"/>.</summary>
+/// <summary>The result of <see cref="SelectionService.CaptureAsync(bool, bool, CancellationToken)"/>.</summary>
 /// <param name="Text">The selected text when <paramref name="Failure"/> is <see cref="SelectionFailure.None"/>.</param>
 /// <param name="Snapshot">The user's original clipboard, to put back with <see cref="SelectionService.RestoreClipboard"/>.</param>
 /// <param name="Anchor">Where the selection was, to return to it after the model answered. Null when the OS cannot say.</param>
-public sealed record SelectionCapture(string? Text, IClipboardSnapshot? Snapshot, SelectionFailure Failure, IFocusAnchor? Anchor = null);
+/// <param name="SelectedAll">True when the whole field was selected to get the text (select-all, or Auto with nothing selected).</param>
+public sealed record SelectionCapture(string? Text, IClipboardSnapshot? Snapshot, SelectionFailure Failure, IFocusAnchor? Anchor = null, bool SelectedAll = false);
 
 /// <summary>What a paste left behind.</summary>
 /// <param name="Pasted">False when the clipboard refused.</param>
@@ -42,7 +43,14 @@ public sealed class SelectionService(IClipboardAccess clipboard, IKeySender keys
     public TimeSpan PasteSettleDelay { get; set; } = TimeSpan.FromMilliseconds(120);
 
     /// <summary>Copies the selection (or the whole field first) and returns it. The clipboard is restored on failure.</summary>
-    public async Task<SelectionCapture> CaptureAsync(bool selectAll, CancellationToken ct = default)
+    public async Task<SelectionCapture> CaptureAsync(bool selectAll, CancellationToken ct = default) =>
+        await CaptureAsync(selectAll, auto: false, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// With <paramref name="auto"/>, copies the current selection first and only selects the whole field when that
+    /// copy gives nothing. <paramref name="selectAll"/> always selects first.
+    /// </summary>
+    public async Task<SelectionCapture> CaptureAsync(bool selectAll, bool auto, CancellationToken ct = default)
     {
         var snapshot = clipboard.Snapshot();
         if (snapshot is null)
@@ -60,7 +68,18 @@ public sealed class SelectionService(IClipboardAccess clipboard, IKeySender keys
             await Task.Delay(50, ct).ConfigureAwait(false);
         }
 
-        var (copied, text) = await TryCopyAsync(sentinel, ct).ConfigureAwait(false);
+        var (copied, text) = await TryCopyAsync(sentinel, ct, auto && !selectAll ? 1 : 2).ConfigureAwait(false);
+        var selectedAll = selectAll;
+        if (auto && !selectAll && (!copied || string.IsNullOrEmpty(text) || text == sentinel))
+        {
+            // Nothing was selected (apps copy nothing, or an empty string): take the whole field instead.
+            if (sentinel is not null)
+                clipboard.SetText(sentinel);
+            keys.SendSelectAll();
+            await Task.Delay(50, ct).ConfigureAwait(false);
+            selectedAll = true;
+            (copied, text) = await TryCopyAsync(sentinel, ct).ConfigureAwait(false);
+        }
         if (!copied)
         {
             clipboard.Restore(snapshot);
@@ -72,13 +91,13 @@ public sealed class SelectionService(IClipboardAccess clipboard, IKeySender keys
             return new SelectionCapture(null, snapshot, SelectionFailure.Empty);
         }
         // After the copy (and after Ctrl+A), so the anchor holds the range that was really copied.
-        return new SelectionCapture(text, snapshot, SelectionFailure.None, foreground.SaveFocus());
+        return new SelectionCapture(text, snapshot, SelectionFailure.None, foreground.SaveFocus(), selectedAll);
     }
 
     /// <summary>Sends copy (twice at most) and waits for the clipboard to change.</summary>
-    private async Task<(bool Copied, string? Text)> TryCopyAsync(string? sentinel, CancellationToken ct)
+    private async Task<(bool Copied, string? Text)> TryCopyAsync(string? sentinel, CancellationToken ct, int attempts = 2)
     {
-        for (var attempt = 0; attempt < 2; attempt++)
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
             var previous = clipboard.ChangeCount;
             keys.SendCopy();

@@ -16,15 +16,38 @@ public static class SkillIds
     public const string Rewrite = "rewrite";
     public const string RewriteLanguage = "rewrite-language";
     public const string ImprovePrompt = "improve-prompt";
+    public const string LayoutAnyFa = "layout-any-fa";
+    public const string LayoutSwap = "layout-swap";
 
     /// <summary>Every built-in id.</summary>
-    public static IReadOnlyList<string> Builtin { get; } = [Fix, FixAll, Translate, Rewrite, RewriteLanguage, ImprovePrompt];
+    public static IReadOnlyList<string> Builtin { get; } = [Fix, FixAll, Translate, Rewrite, RewriteLanguage, ImprovePrompt, LayoutAnyFa, LayoutSwap];
 
     /// <summary>Built-ins that can only be turned off: the app's fallback and old settings rely on them.</summary>
     public static IReadOnlyList<string> CoreBuiltin { get; } = [Fix, FixAll, Translate];
 
     /// <summary>Built-ins a user may delete; a deleted one is not added back on the next start.</summary>
-    public static IReadOnlyList<string> OptionalBuiltin { get; } = [Rewrite, RewriteLanguage, ImprovePrompt];
+    public static IReadOnlyList<string> OptionalBuiltin { get; } = [Rewrite, RewriteLanguage, ImprovePrompt, LayoutAnyFa, LayoutSwap];
+}
+
+/// <summary>What a skill does with its text.</summary>
+public static class SkillKinds
+{
+    /// <summary>Sends the text through an AI model with the skill's prompt.</summary>
+    public const string Ai = "ai";
+
+    /// <summary>Re-types text typed on one keyboard layout as another layout (no AI, no internet).</summary>
+    public const string Layout = "layout";
+
+    /// <summary>Swaps two layouts: text typed on A becomes B's and the other way round.</summary>
+    public const string Swap = "swap";
+
+    /// <summary>Maps loose spellings to a valid kind.</summary>
+    public static string Normalize(string? value) => (value ?? "").Trim().ToLowerInvariant() switch
+    {
+        Layout => Layout,
+        Swap => Swap,
+        _ => Ai,
+    };
 }
 
 /// <summary>How a skill gets its text.</summary>
@@ -36,10 +59,15 @@ public static class InputModes
     /// <summary>Select the whole field first.</summary>
     public const string SelectAll = "select_all";
 
+    /// <summary>The selection when there is one, else the whole field.</summary>
+    public const string Auto = "auto";
+
     /// <summary>Maps loose spellings ("Select all", "all") to a valid mode.</summary>
     public static string Normalize(string? value)
     {
         var raw = (value ?? "").Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
+        if (raw == "auto")
+            return Auto;
         return raw is "select_all" or "selectall" or "all" ? SelectAll : Selection;
     }
 }
@@ -53,8 +81,17 @@ public sealed class Skill
     /// <summary>Name shown in menus and settings.</summary>
     public string Name { get; set; } = "New skill";
 
+    /// <summary>See <see cref="SkillKinds"/>.</summary>
+    public string Kind { get; set; } = SkillKinds.Ai;
+
+    /// <summary>Layout kinds: the layout the text was typed on (a language code such as "en", or "any"). For a swap: the first language.</summary>
+    public string LayoutFrom { get; set; } = "any";
+
+    /// <summary>Layout kinds: the layout the text should have been typed on. For a swap: the second language.</summary>
+    public string LayoutTo { get; set; } = "fa";
+
     /// <summary>See <see cref="InputModes"/>.</summary>
-    public string InputMode { get; set; } = InputModes.Selection;
+    public string InputMode { get; set; } = InputModes.Auto;
 
     /// <summary>Prompt template with <c>{{content}}</c> and <c>{{language}}</c>.</summary>
     public string Prompt { get; set; } = PromptRenderer.DefaultCustomPrompt;
@@ -90,11 +127,17 @@ public sealed class Skill
     /// <summary>Timeout of a custom fallback endpoint, in seconds. Zero keeps the global timeout.</summary>
     public double ModelFallbackTimeout { get; set; }
 
-    /// <summary>True when the skill cannot run without a configured AI model: every skill needs one.</summary>
-    public bool NeedsAi => true;
+    /// <summary>True when the skill cannot run without a configured AI model: every skill but a layout conversion.</summary>
+    public bool NeedsAi => Kind == SkillKinds.Ai;
+
+    /// <summary>True for the layout kinds (convert, swap).</summary>
+    public bool IsLayout => Kind != SkillKinds.Ai;
 
     /// <summary>True when the whole field is selected first.</summary>
     public bool SelectAll => InputMode == InputModes.SelectAll;
+
+    /// <summary>True when the selection is used if there is one, and the whole field otherwise.</summary>
+    public bool Auto => InputMode == InputModes.Auto;
 
     /// <summary>The parsed shortcut (disabled when the text is empty or invalid).</summary>
     public Hotkey HotkeyValue() => HotkeyParser.ParseOrDisabled(Hotkey);
@@ -127,6 +170,11 @@ public sealed class Skill
         Id = string.IsNullOrWhiteSpace(Id) ? Guid.NewGuid().ToString() : Id.Trim();
         Name = string.IsNullOrWhiteSpace(Name) ? "New skill" : Name.Trim();
         InputMode = InputModes.Normalize(InputMode);
+        Kind = SkillKinds.Normalize(Kind);
+        LayoutFrom = string.IsNullOrWhiteSpace(LayoutFrom) ? "any" : LayoutFrom.Trim().ToLowerInvariant();
+        LayoutTo = string.IsNullOrWhiteSpace(LayoutTo) ? "fa" : LayoutTo.Trim().ToLowerInvariant();
+        if (Kind == SkillKinds.Swap && LayoutFrom == "any")
+            LayoutFrom = "en";
         Prompt ??= "";
         Hotkey = HotkeyParser.Normalize(Hotkey, "none");
         OfflineFallback = Id is SkillIds.Fix or SkillIds.FixAll;

@@ -225,4 +225,13 @@ internal static partial class NativeMethods
 
     [LibraryImport("kernel32.dll")]
     public static partial nint LocalFree(nint handle);
+
+    [LibraryImport("user32.dll")]
+    public static unsafe partial int GetKeyboardLayoutList(int count, nint* layouts);
+
+    [LibraryImport("user32.dll")]
+    public static partial uint MapVirtualKeyExW(uint code, uint mapType, nint layout);
+
+    [LibraryImport("user32.dll")]
+    public static unsafe partial int ToUnicodeEx(uint virtualKey, uint scanCode, byte* keyState, char* buffer, int bufferSize, uint flags, nint layout);
 }

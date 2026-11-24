@@ -48,4 +48,5 @@ public static class HotkeyDefaults
     public const string FixAll = "Ctrl+F3";
     public const string Translate = "Ctrl+Alt+T";
     public const string Menu = "Ctrl+Alt+M";
+    public const string Swap = "Ctrl+Alt+L";
 }

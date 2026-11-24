@@ -19,10 +19,10 @@ public sealed class SkillTests : IDisposable
     public void Default_skills_include_fix_translate_and_rewrite()
     {
         var skills = SkillCatalog.DefaultSkills();
-        Assert.Equal(["fix", "fix-all", "translate", "rewrite", "rewrite-language", "improve-prompt"], skills.Select(s => s.Id));
+        Assert.Equal(["fix", "fix-all", "translate", "rewrite", "rewrite-language", "improve-prompt", "layout-any-fa", "layout-swap"], skills.Select(s => s.Id));
         Assert.Equal("Ctrl+Alt+Space", skills[0].Hotkey);
         Assert.Equal("Ctrl+F3", skills[1].Hotkey);
-        Assert.True(skills[1].SelectAll);
+        Assert.True(skills[1].Auto);
         Assert.Equal("Ctrl+Alt+T", skills[2].Hotkey);
         Assert.True(skills[0].OfflineFallback && skills[1].OfflineFallback);
         Assert.False(skills[2].OfflineFallback);
@@ -87,7 +87,7 @@ public sealed class SkillTests : IDisposable
         foreach (var key in new[] { "\"version\"", "\"skill_menu_hotkey\"", "\"dismissed\"", "\"skills\"", "\"input_mode\"", "\"offline_fallback\"",
                      "\"model_mode\"", "\"model_provider\"", "\"model_fallback_provider\"", "\"model_fallback\"" })
             Assert.Contains(key, json);
-        Assert.Contains("\"input_mode\": \"select_all\"", json);
+        Assert.Contains("\"input_mode\": \"auto\"", json);
     }
 
     [Fact]

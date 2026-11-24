@@ -158,6 +158,49 @@ public class WiringTests
     }
 
     [AvaloniaFact]
+    public void A_layout_skill_shows_its_layouts_instead_of_a_prompt_and_follows_its_name()
+    {
+        var s = TestServices.EnsureInitialized("en");
+        using var page = new SkillsPageViewModel(s);
+
+        page.AddLayoutCommand.Execute(null);
+        var skill = page.Selected!.Skill;
+        Assert.True(page.IsLayoutSkill);
+        Assert.False(page.IsAiSkill);
+        Assert.False(skill.NeedsAi);
+        Assert.Equal(("any", "fa"), (skill.LayoutFrom, skill.LayoutTo));
+        Assert.Equal("Any language to FA", skill.Name);
+        Assert.Equal(["any", "en", "fa"], page.FromChoices.Select(c => c.Id));
+        Assert.Equal(["en", "fa"], page.ToChoices.Select(c => c.Id));
+
+        // A name nobody typed follows the choice.
+        page.LayoutFromChoice = page.FromChoices.First(c => c.Id == "en");
+        page.LayoutToChoice = page.ToChoices.First(c => c.Id == "en");
+        Assert.Equal(("en", "en"), (skill.LayoutFrom, skill.LayoutTo));
+        Assert.Equal("EN to EN", skill.Name);
+        // A name the user typed stays.
+        page.Name = "My fix";
+        page.LayoutToChoice = page.ToChoices.First(c => c.Id == "fa");
+        Assert.Equal("My fix", skill.Name);
+
+        // The built-in swap has two languages and no "any".
+        page.Selected = page.Rows.First(r => r.Skill.Id == SkillIds.LayoutSwap);
+        Assert.True(page.IsSwapSkill);
+        Assert.Equal(["en", "fa"], page.FromChoices.Select(c => c.Id));
+        Assert.Equal("First language", page.FromLabel);
+
+        // An AI skill is unchanged.
+        page.Selected = page.Rows.First(r => r.Skill.Id == SkillIds.Fix);
+        Assert.True(page.IsAiSkill);
+        Assert.False(page.IsLayoutSkill);
+
+        // The layout skill is saved with its kind.
+        page.Flush();
+        var reloaded = SkillStoreFile.Load(s.Store.SkillsPath).Store.Get(skill.Id)!;
+        Assert.Equal((SkillKinds.Layout, "en", "fa"), (reloaded.Kind, reloaded.LayoutFrom, reloaded.LayoutTo));
+    }
+
+    [AvaloniaFact]
     public void The_skills_page_adds_edits_duplicates_moves_and_deletes_with_saving()
     {
         var s = TestServices.EnsureInitialized("en");

@@ -13,7 +13,7 @@ namespace TinyFix.App.ViewModels;
 /// <summary>View model of the donut window.</summary>
 public sealed partial class DonutViewModel : ObservableObject
 {
-    private readonly List<(int Index, string Name, string Shortcut, bool Usable, string? Icon)> _all;
+    private readonly List<(int Index, string Name, string Shortcut, bool Usable, string? Icon, string Reason)> _all;
     private readonly ILocalizer _loc;
     private readonly DonutLook _look;
 
@@ -26,8 +26,8 @@ public sealed partial class DonutViewModel : ObservableObject
     {
         _loc = loc;
         _look = look ?? DonutLook.Default;
-        _all = skills.Select((s, i) => (i, SkillNames.Display(s, loc), s.HotkeyValue().IsDisabled ? "" : s.DisplayHotkey(), !s.NeedsAi || usable(s), SliceIcons.For(s.Id))).ToList();
-        AiHint = _all.Count > 0 && _all.All(item => !item.Usable) ? loc["donut.ai_hint"] : "";
+        _all = skills.Select((s, i) => (i, SkillNames.Display(s, loc), s.HotkeyValue().IsDisabled ? "" : s.DisplayHotkey(), usable(s), SliceIcons.For(s.Id), loc[s.NeedsAi ? "donut.needs_ai" : "donut.needs_layout"])).ToList();
+        AiHint = _all.Count > 0 && skills.All(s => s.NeedsAi) && _all.All(item => !item.Usable) ? loc["donut.ai_hint"] : "";
     }
 
     /// <summary>Raised once: the chosen skill index, or null when the donut was cancelled.</summary>
@@ -72,7 +72,7 @@ public sealed partial class DonutViewModel : ObservableObject
                         FullName = item.Name,
                         Caption = item.Shortcut.Length == 0 ? null : item.Shortcut,
                         IsEnabled = item.Usable,
-                        DisabledReason = _loc["donut.needs_ai"],
+                        DisabledReason = item.Reason,
                         IconKey = item.Icon,
                     };
                 })
@@ -145,7 +145,7 @@ public sealed partial class DonutViewModel : ObservableObject
             if (Hover >= 0 && Hover < Slices.Count)
             {
                 var item = Slices[Hover];
-                return item.IsEnabled ? item.Caption ?? "" : _loc["donut.needs_ai"];
+                return item.IsEnabled ? item.Caption ?? "" : item.DisabledReason ?? "";
             }
             return PageCount > 1 ? PageText : _loc["donut.close"];
         }
@@ -191,7 +191,13 @@ public static class SkillNames
         [SkillIds.Rewrite] = "Rewrite",
         [SkillIds.RewriteLanguage] = "Rewrite to target language",
         [SkillIds.ImprovePrompt] = "Improve prompt",
+        [SkillIds.LayoutAnyFa] = "Any language to FA",
+        [SkillIds.LayoutSwap] = "Swap two languages",
     };
+
+    /// <summary>True for a built-in that still carries its English default name (the user never renamed it).</summary>
+    public static bool IsDefaultName(Skill skill) =>
+        skill.Builtin && EnglishDefaults.TryGetValue(skill.Id, out var english) && skill.Name == english;
 
     /// <summary>
     /// The name shown for a skill: a built-in that still carries its English default name is shown in the UI language

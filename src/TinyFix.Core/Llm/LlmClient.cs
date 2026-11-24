@@ -7,6 +7,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using TinyFix.Core.Prompts;
+using TinyFix.Core.Usage;
 
 namespace TinyFix.Core.Llm;
 
@@ -136,14 +137,63 @@ public sealed partial class LlmClient
 
     private async Task<LlmResult> AttemptAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, char letter, CancellationToken ct)
     {
-        var text = endpoint.Protocol switch
+        var role = IsLocal(endpoint) ? 'L' : letter;
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
         {
-            LlmProtocols.Google => await CompleteGeminiAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
-            LlmProtocols.Anthropic => await CompleteAnthropicAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
-            _ => await CompleteOpenAiAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
-        };
-        return new LlmResult(text, IsLocal(endpoint) ? 'L' : letter);
+            var reply = endpoint.Protocol switch
+            {
+                LlmProtocols.Google => await CompleteGeminiAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
+                LlmProtocols.Anthropic => await CompleteAnthropicAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
+                _ => await CompleteOpenAiAsync(endpoint, prompt, timeout, ct).ConfigureAwait(false),
+            };
+            Report(endpoint, role, started, "", reply);
+            return new LlmResult(reply.Text, role);
+        }
+        catch (LlmException ex) when (ex.Kind != LlmErrorKind.Config)
+        {
+            Report(endpoint, role, started, DescribeFailure(ex), default);
+            throw;
+        }
     }
+
+    /// <summary>Raised after every request to a model, whether it worked or not. Carries no text and no key.</summary>
+    public event Action<LlmAttempt>? Attempted;
+
+    private void Report(LlmEndpoint endpoint, char role, long started, string error, Reply reply)
+    {
+        var handler = Attempted;
+        if (handler is null)
+            return;
+        var attempt = new LlmAttempt(_time.GetUtcNow(), LlmProtocols.Normalize(endpoint.Protocol), EffectiveModel(endpoint), role,
+            error.Length == 0, error, (int)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            reply.InputTokens, reply.OutputTokens, reply.Cost);
+        try
+        {
+            handler(attempt);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Bookkeeping must never break a request the user is waiting on.
+        }
+    }
+
+    private static string DescribeFailure(LlmException ex) =>
+        ex.Kind == LlmErrorKind.Http ? $"HTTP {ex.StatusCode}" : ex.Kind.ToString();
+
+    private static string EffectiveModel(LlmEndpoint endpoint)
+    {
+        var protocol = LlmProtocols.Normalize(endpoint.Protocol);
+        var model = string.IsNullOrWhiteSpace(endpoint.Model) ? LlmProtocols.DefaultModel(protocol) : endpoint.Model.Trim();
+        return model.StartsWith("models/", StringComparison.Ordinal) ? model["models/".Length..] : model;
+    }
+
+    /// <summary>The cleaned answer and what the provider said it used.</summary>
+    private readonly record struct Reply(string Text, long InputTokens = 0, long OutputTokens = 0, decimal? Cost = null);
+
+    private static long Count(JsonElement parent, string name) =>
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var value) &&
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number) ? number : 0;
 
     private static bool IsLocal(LlmEndpoint endpoint) =>
         LlmProtocols.IsLocalPreset(endpoint.Protocol) || LlmProtocols.IsLoopback(EffectiveBase(endpoint));
@@ -154,7 +204,7 @@ public sealed partial class LlmClient
     private static TimeSpan Span(double seconds) =>
         TimeSpan.FromSeconds(seconds > 0 ? seconds : LlmDefaults.DefaultTimeoutSeconds);
 
-    private async Task<string> CompleteGeminiAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
+    private async Task<Reply> CompleteGeminiAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
     {
         var model = (string.IsNullOrWhiteSpace(endpoint.Model) ? LlmDefaults.GoogleModel : endpoint.Model).Trim();
         if (model.StartsWith("models/", StringComparison.Ordinal))
@@ -199,10 +249,13 @@ public sealed partial class LlmClient
         }
         if (string.IsNullOrWhiteSpace(sb.ToString()))
             throw new LlmException(LlmErrorKind.EmptyResponse, "Gemini returned empty text");
-        return PromptRenderer.StripModelOutput(sb.ToString());
+        doc.RootElement.TryGetProperty("usageMetadata", out var usage);
+        // Thinking tokens are billed as output.
+        return new Reply(PromptRenderer.StripModelOutput(sb.ToString()), Count(usage, "promptTokenCount"),
+            Count(usage, "candidatesTokenCount") + Count(usage, "thoughtsTokenCount"));
     }
 
-    private async Task<string> CompleteOpenAiAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
+    private async Task<Reply> CompleteOpenAiAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
     {
         var protocol = endpoint.Protocol == LlmDefaults.ProviderOpenAi ? LlmProtocols.Custom : endpoint.Protocol;
         var rawBase = string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmProtocols.DefaultBaseUrl(protocol) : endpoint.BaseUrl;
@@ -248,10 +301,14 @@ public sealed partial class LlmClient
         }
         if (string.IsNullOrWhiteSpace(text))
             throw new LlmException(LlmErrorKind.EmptyResponse, "The model returned empty text");
-        return PromptRenderer.StripModelOutput(text);
+        doc.RootElement.TryGetProperty("usage", out var usage);
+        // OpenRouter reports what the request cost in dollars; other servers do not.
+        decimal? cost = usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("cost", out var c) &&
+                        c.ValueKind == JsonValueKind.Number && c.TryGetDecimal(out var dollars) ? dollars : null;
+        return new Reply(PromptRenderer.StripModelOutput(text), Count(usage, "prompt_tokens"), Count(usage, "completion_tokens"), cost);
     }
 
-    private async Task<string> CompleteAnthropicAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
+    private async Task<Reply> CompleteAnthropicAsync(LlmEndpoint endpoint, string prompt, TimeSpan timeout, CancellationToken ct)
     {
         var baseUrl = string.IsNullOrWhiteSpace(endpoint.BaseUrl) ? LlmProtocols.AnthropicBase : endpoint.BaseUrl.Trim().TrimEnd('/');
         AssertSafeBaseUrl(baseUrl);
@@ -293,7 +350,10 @@ public sealed partial class LlmClient
         }
         if (string.IsNullOrWhiteSpace(sb.ToString()))
             throw new LlmException(LlmErrorKind.EmptyResponse, "Anthropic returned empty text");
-        return PromptRenderer.StripModelOutput(sb.ToString());
+        doc.RootElement.TryGetProperty("usage", out var usage);
+        return new Reply(PromptRenderer.StripModelOutput(sb.ToString()),
+            Count(usage, "input_tokens") + Count(usage, "cache_creation_input_tokens") + Count(usage, "cache_read_input_tokens"),
+            Count(usage, "output_tokens"));
     }
 
     /// <summary>Lists the model ids the endpoint offers.</summary>

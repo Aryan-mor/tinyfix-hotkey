@@ -2,6 +2,7 @@
 // the set that matches the running OS. Everything here is small on purpose so a fake is easy to write in a test.
 
 using TinyFix.Core.Hotkeys;
+using TinyFix.Core.Layouts;
 
 namespace TinyFix.Core.Platform;
 
@@ -171,4 +172,5 @@ public sealed record PlatformServices(
     ICaretLocator Caret,
     ISecretStore Secrets,
     IAutostart Autostart,
-    PlatformCapabilities Capabilities);
+    PlatformCapabilities Capabilities,
+    IKeyboardLayouts? Layouts = null);

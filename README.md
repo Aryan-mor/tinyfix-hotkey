@@ -9,6 +9,7 @@ Fix the text you are typing in any app: select it, press a shortcut, and the cor
 - **Fix in place.** Select text, press a shortcut, and the corrected text replaces it. No copy and paste, no browser tab.
 - **Fix the whole field.** One shortcut selects everything in the current text box, fixes it, and pastes it back.
 - **Any language.** The model fixes text in the language it is written in.
+- **Wrong keyboard layout.** Typed `sghl` with the English layout instead of the Persian one? A layout conversion turns it into `سلام`: from one language (or any) to another, or a swap between your two main languages. It needs no AI model and no internet, uses the layouts installed in Windows, and is off until you turn it on under **Skills**.
 - **Translate, Improve prompt, your own skills.** Every skill has a name, an input mode, a prompt, and an optional shortcut of its own.
 - **The donut menu.** One shortcut opens a ring of your skills next to the caret or the mouse. Pick with the mouse or press 1 to 9. Tab or the mouse wheel flips pages. Size, opacity and where it opens are set in Settings, with a live preview.
 - **Your choice of model.** Google, OpenRouter, or any OpenAI-compatible endpoint, with a fallback model. API keys are stored encrypted with Windows DPAPI (macOS Keychain and Linux libsecret adapters exist but are untested).
@@ -23,7 +24,7 @@ Fix the text you are typing in any app: select it, press a shortcut, and the cor
 | Translate | Ctrl+Alt+T |
 | Donut menu | Ctrl+Alt+M |
 
-Change any of them in **Settings**. A skill does nothing until an AI model is set up under **AI models** (and an API key is saved, when that protocol asks for one).
+Change any of them in **Settings**. An AI skill does nothing until an AI model is set up under **AI models** (and an API key is saved, when that protocol asks for one).
 
 ## Install
 

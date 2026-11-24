@@ -277,13 +277,20 @@ public sealed class SelectionAndSettingsTests : IDisposable
         Assert.Null(status.Undo);
     }
 
+    private static Skill WholeField(UserDataStore store)
+    {
+        var skill = store.Skills.Get(SkillIds.FixAll)!;
+        skill.InputMode = InputModes.SelectAll;
+        return skill;
+    }
+
     [Fact]
     public async Task A_whole_field_skill_selects_all_again_before_it_pastes()
     {
         var fake = new FakeClipboard { Selection = "Hi frinds" };
         var status = new RecordingStatus();
         var store = NewStore();
-        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(store.Skills.Get(SkillIds.FixAll)!, "w1", Ct);
+        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(WholeField(store), "w1", Ct);
         Assert.Equal(2, fake.Log.Count(l => l == "selectall"));
         Assert.True(fake.Log.LastIndexOf("selectall") < fake.Log.IndexOf("paste"));
         Assert.Equal("Hi friends", fake.PastedOver);
@@ -311,7 +318,7 @@ public sealed class SelectionAndSettingsTests : IDisposable
         fake.Anchor = anchor;
         var status = new RecordingStatus();
         var store = NewStore();
-        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(store.Skills.Get(SkillIds.FixAll)!, "w1", Ct);
+        await OnlineRunner(fake, status, store, "Hi friends").RunAsync(WholeField(store), "w1", Ct);
         Assert.True(anchor.Restored);
         Assert.Equal(1, fake.Log.Count(l => l == "selectall"));
         fake.Log.Clear();

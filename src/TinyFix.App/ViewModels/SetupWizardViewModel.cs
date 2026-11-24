@@ -290,6 +290,8 @@ public sealed partial class SetupSkillRowViewModel : ObservableObject
         SkillIds.Rewrite => "setup.skill.rewrite.desc",
         SkillIds.RewriteLanguage => "setup.skill.rewrite-language.desc",
         SkillIds.ImprovePrompt => "setup.skill.improve-prompt.desc",
+        SkillIds.LayoutAnyFa => "setup.skill.layout-any-fa.desc",
+        SkillIds.LayoutSwap => "setup.skill.layout-swap.desc",
         _ => "setup.skill.custom.desc",
     };
 }

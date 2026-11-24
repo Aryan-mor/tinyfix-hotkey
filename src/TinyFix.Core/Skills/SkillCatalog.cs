@@ -44,13 +44,15 @@ public static class SkillCatalog
         legacy ??= new LegacySkillOptions();
         return
         [
-            Make(SkillIds.Fix, "Fix", InputModes.Selection, Or(legacy.FixPrompt, DefaultPrompts.Fix), legacy.FixHotkey, HotkeyDefaults.Fix, true),
-            Make(SkillIds.FixAll, "Fix all", InputModes.SelectAll, Or(legacy.FixPrompt, DefaultPrompts.Fix), legacy.FixAllHotkey, HotkeyDefaults.FixAll, true),
-            Make(SkillIds.Translate, "Translate", legacy.TranslateSelectAll ? InputModes.SelectAll : InputModes.Selection,
+            Make(SkillIds.Fix, "Fix", InputModes.Auto, Or(legacy.FixPrompt, DefaultPrompts.Fix), legacy.FixHotkey, HotkeyDefaults.Fix, true),
+            Make(SkillIds.FixAll, "Fix all", InputModes.Auto, Or(legacy.FixPrompt, DefaultPrompts.Fix), legacy.FixAllHotkey, HotkeyDefaults.FixAll, true),
+            Make(SkillIds.Translate, "Translate", legacy.TranslateSelectAll ? InputModes.SelectAll : InputModes.Auto,
                 Or(legacy.TranslatePrompt, DefaultPrompts.Translate), legacy.TranslateHotkey, HotkeyDefaults.Translate, true),
-            Make(SkillIds.Rewrite, "Rewrite", InputModes.Selection, DefaultPrompts.Rewrite, "none", "none", false),
-            Make(SkillIds.RewriteLanguage, "Rewrite to target language", InputModes.Selection, DefaultPrompts.RewriteLanguage, "none", "none", false),
-            Make(SkillIds.ImprovePrompt, "Improve prompt", InputModes.Selection, DefaultPrompts.ImprovePrompt, "none", "none", true, ModelModes.Better),
+            Make(SkillIds.Rewrite, "Rewrite", InputModes.Auto, DefaultPrompts.Rewrite, "none", "none", false),
+            Make(SkillIds.RewriteLanguage, "Rewrite to target language", InputModes.Auto, DefaultPrompts.RewriteLanguage, "none", "none", false),
+            Make(SkillIds.ImprovePrompt, "Improve prompt", InputModes.Auto, DefaultPrompts.ImprovePrompt, "none", "none", true, ModelModes.Better),
+            MakeLayout(SkillIds.LayoutAnyFa, "Any language to FA", SkillKinds.Layout, "any", "fa", InputModes.Auto, "none"),
+            MakeLayout(SkillIds.LayoutSwap, "Swap two languages", SkillKinds.Swap, "en", "fa", InputModes.Selection, HotkeyDefaults.Swap),
         ];
     }
 
@@ -68,6 +70,34 @@ public static class SkillCatalog
             Enabled = enabled,
             Builtin = true,
             ModelMode = mode,
+        }.Normalize();
+
+    // Layout conversions are off until the user turns them on: they need the layouts installed in the OS, and a fresh
+    // install should not show a donut slice that cannot work.
+    private static Skill MakeLayout(string id, string name, string kind, string from, string to, string input, string hotkey) =>
+        new Skill
+        {
+            Id = id,
+            Name = name,
+            Kind = kind,
+            LayoutFrom = from,
+            LayoutTo = to,
+            InputMode = input,
+            Hotkey = hotkey,
+            Enabled = false,
+            Builtin = true,
+        }.Normalize();
+
+    /// <summary>A new layout conversion: <paramref name="from"/> ("any" or a language code) to <paramref name="to"/>.</summary>
+    public static Skill NewLayoutSkill(string name, string from = "any", string to = "fa") =>
+        new Skill
+        {
+            Id = Guid.NewGuid().ToString(),
+            Name = name,
+            Kind = SkillKinds.Layout,
+            LayoutFrom = from,
+            LayoutTo = to,
+            InputMode = InputModes.Auto,
         }.Normalize();
 
     /// <summary>A store with the default skills.</summary>
@@ -97,7 +127,7 @@ public static class SkillCatalog
                 skill.Builtin = true;
                 skill.OfflineFallback = true;
             }
-            else if (skill.Id is SkillIds.Translate or SkillIds.Rewrite or SkillIds.RewriteLanguage or SkillIds.ImprovePrompt)
+            else if (skill.Id is SkillIds.Translate or SkillIds.Rewrite or SkillIds.RewriteLanguage or SkillIds.ImprovePrompt or SkillIds.LayoutAnyFa or SkillIds.LayoutSwap)
             {
                 skill.Builtin = true;
                 skill.OfflineFallback = false;

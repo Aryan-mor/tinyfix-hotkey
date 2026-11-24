@@ -25,4 +25,24 @@ public static class UrlOpener
             return false;
         }
     }
+
+    /// <summary>Opens a local text file in an editor. False when none could be started.</summary>
+    public static bool OpenFile(string path)
+    {
+        try
+        {
+            // The file type may have no default program, so ask for a plain text editor first.
+            if (OperatingSystem.IsWindows())
+                Process.Start(new ProcessStartInfo("notepad.exe") { ArgumentList = { path }, UseShellExecute = false })?.Dispose();
+            else if (OperatingSystem.IsMacOS())
+                Process.Start(new ProcessStartInfo("open") { ArgumentList = { "-t", path }, UseShellExecute = false })?.Dispose();
+            else
+                Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { path }, UseShellExecute = false })?.Dispose();
+            return true;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            return false;
+        }
+    }
 }

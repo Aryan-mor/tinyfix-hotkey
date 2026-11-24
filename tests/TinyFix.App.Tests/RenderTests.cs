@@ -26,7 +26,7 @@ public class RenderTests
         {
             var data = new TheoryData<string, string>();
             foreach (var language in new[] { "en", "fa", "ja", "de" })
-                foreach (var page in new[] { "General", "Donut", "Skills", "Variables", "Online", "Updates", "About" })
+                foreach (var page in new[] { "General", "Donut", "Skills", "Variables", "Online", "Cost", "Updates", "About" })
                     data.Add(page, language);
             return data;
         }
