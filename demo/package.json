@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "studio": "remotion studio",
-    "render": "remotion render TinyFixDemo out/demo.mp4 --log=verbose",
-    "render:gif": "remotion render TinyFixDemo out/demo.gif --codec=gif --scale=0.5 --every-nth-frame=2"
+    "render": "remotion render Tour out/Tour.mp4 && remotion render Fix out/Fix.mp4 && remotion render Donut out/Donut.mp4 && remotion render Layout out/Layout.mp4",
+    "render:still": "remotion still SocialPreview out/social-preview.png",
+    "render:gif": "node scripts/to-gif.mjs"
   },
   "dependencies": {
     "@remotion/cli": "4.0.534",
