@@ -97,7 +97,8 @@ public sealed partial class UpdatesPageViewModel : PageViewModel
             var path = await UpdateChecker.DownloadInstallerAsync(http, installerUrl).ConfigureAwait(true);
             Status = _s.Loc["updates.installing"];
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path,
-                "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS") { UseShellExecute = true });
+                "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS")
+            { UseShellExecute = true });
             (Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.Shutdown();
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException
