@@ -80,6 +80,7 @@
               </StackPanel>
             </StackPanel>
             <StackPanel Spacing="14" IsVisible="{Binding IsAiSkill}">
+            <ToggleSwitch IsChecked="{Binding KeepOriginal}" Content="{DynamicResource skills.keep_original}" />
             <StackPanel>
               <TextBlock Text="{DynamicResource skills.model}" Classes="label" />
               <ComboBox SelectedIndex="{Binding ModelModeIndex}" MinWidth="280">

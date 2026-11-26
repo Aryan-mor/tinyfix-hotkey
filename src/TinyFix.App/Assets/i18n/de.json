@@ -48,7 +48,7 @@
   "settings.theme_light": "Hell",
   "settings.theme_dark": "Dunkel",
   "settings.autostart": "Mit dem System starten",
-  "settings.keep_previous": "Den Originaltext nach einer Änderung in der Zwischenablage behalten",
+  "skills.keep_original": "Den Originaltext nach einer Änderung in der Zwischenablage behalten",
   "settings.change_toast": "Nach einer Änderung einen Hinweis mit Rückgängig anzeigen",
   "status.changed": "{0}: Text geändert",
   "toast.undo": "Rückgängig",

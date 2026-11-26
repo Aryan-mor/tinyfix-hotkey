@@ -214,7 +214,7 @@ public sealed class SelectionAndSettingsTests : IDisposable
         var fake = new FakeClipboard { Selection = "Hi frinds, i hope" };
         var status = new RecordingStatus();
         var store = NewStore();
-        store.Settings.KeepPreviousOnClipboard = false;
+        store.Skills.Get(SkillIds.Fix)!.KeepOriginalOnClipboard = false;
         var runner = OnlineRunner(fake, status, store, "Hi friends, I hope");
         await runner.RunAsync(store.Skills.Get(SkillIds.Fix)!, "w1", Ct);
         Assert.Equal("Hi friends, I hope", fake.PastedOver);
@@ -228,13 +228,23 @@ public sealed class SelectionAndSettingsTests : IDisposable
         var fake = new FakeClipboard { Selection = "Hi frinds" };
         var status = new RecordingStatus();
         var store = NewStore();
-        Assert.True(store.Settings.KeepPreviousOnClipboard);
+        Assert.True(store.Skills.Get(SkillIds.Fix)!.KeepOriginalOnClipboard);
         Assert.True(store.Settings.ShowChangeToast);
         await OnlineRunner(fake, status, store, "Hi friends").RunAsync(store.Skills.Get(SkillIds.Fix)!, "w1", Ct);
         Assert.Equal("Hi friends", fake.PastedOver);
         Assert.Equal("Hi frinds", fake.Text);
         Assert.Contains("status.changed", status.Keys);
         Assert.NotNull(status.Undo);
+    }
+
+    [Fact]
+    public void The_old_global_keep_original_switch_moves_to_every_skill()
+    {
+        File.WriteAllText(Path.Combine(_dir, UserDataStore.SettingsFileName), "{ \"keep_previous_on_clipboard\": false }");
+        var store = NewStore();
+        Assert.All(store.Skills.Skills, skill => Assert.False(skill.KeepOriginalOnClipboard));
+        Assert.DoesNotContain("keep_previous_on_clipboard", File.ReadAllText(store.SettingsPath));
+        Assert.False(NewStore().Skills.Get(SkillIds.Fix)!.KeepOriginalOnClipboard);
     }
 
     [Fact]

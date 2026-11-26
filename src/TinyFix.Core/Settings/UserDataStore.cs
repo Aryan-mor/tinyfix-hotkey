@@ -45,6 +45,7 @@ public sealed class UserDataStore
     /// <summary>Reads both files (defaults when missing or damaged) and imports the Python app's files the first time.</summary>
     public void Load()
     {
+        var keepOriginalOff = WasKeepPreviousTurnedOff();
         Settings = ReadSettings(SettingsPath);
         if (!Settings.LegacyImported)
         {
@@ -54,8 +55,34 @@ public sealed class UserDataStore
         }
         var (store, created) = SkillStoreFile.Load(SkillsPath);
         Skills = store;
-        if (created)
+        if (keepOriginalOff)
+        {
+            foreach (var skill in Skills.Skills)
+                skill.KeepOriginalOnClipboard = false;
+            SaveSettings();
+        }
+        if (created || keepOriginalOff)
             SaveSkills();
+    }
+
+    /// <summary>
+    /// Older settings.json had one global "keep the original text on the clipboard" switch; skills own it now. True when it was
+    /// off. Rewriting settings.json drops the key, so the move happens once.
+    /// </summary>
+    private bool WasKeepPreviousTurnedOff()
+    {
+        try
+        {
+            if (!File.Exists(SettingsPath))
+                return false;
+            using var doc = JsonDocument.Parse(File.ReadAllText(SettingsPath));
+            return doc.RootElement.ValueKind == JsonValueKind.Object &&
+                   doc.RootElement.TryGetProperty("keep_previous_on_clipboard", out var keep) && keep.ValueKind == JsonValueKind.False;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>The folder of an installed Python app, if this OS and environment have one.</summary>

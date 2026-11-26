@@ -150,6 +150,10 @@ public sealed partial class SkillsPageViewModel : PageViewModel
     [ObservableProperty]
     private bool _enabled;
 
+    /// <summary>Leave the replaced text on the clipboard after this skill ran.</summary>
+    [ObservableProperty]
+    private bool _keepOriginal;
+
     /// <summary>0 current selection, 1 select the whole field first.</summary>
     [ObservableProperty]
     private int _inputIndex;
@@ -182,6 +186,7 @@ public sealed partial class SkillsPageViewModel : PageViewModel
             var skill = row.Skill;
             Name = SkillNames.Display(skill, _s.Loc);
             Enabled = skill.Enabled;
+            KeepOriginal = skill.KeepOriginalOnClipboard;
             InputIndex = skill.Auto ? 0 : skill.SelectAll ? 2 : 1;
             Shortcut = skill.Hotkey;
             ModelModeIndex = Math.Max(0, Array.IndexOf(ModelModeIds, skill.ModelMode));
@@ -291,6 +296,8 @@ public sealed partial class SkillsPageViewModel : PageViewModel
     });
 
     partial void OnEnabledChanged(bool value) => Edit(skill => skill.Enabled = value);
+
+    partial void OnKeepOriginalChanged(bool value) => Edit(skill => skill.KeepOriginalOnClipboard = value);
 
     partial void OnInputIndexChanged(int value) => Edit(skill => skill.InputMode = value switch
     {

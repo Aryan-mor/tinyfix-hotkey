@@ -99,6 +99,9 @@ public sealed class Skill
     /// <summary>Shortcut text, or <c>none</c>.</summary>
     public string Hotkey { get; set; } = "none";
 
+    /// <summary>AI skills: leave the replaced text on the clipboard instead of restoring what it held before. Layout skills never do.</summary>
+    public bool KeepOriginalOnClipboard { get; set; } = true;
+
     public bool Enabled { get; set; } = true;
     public bool Builtin { get; set; }
 

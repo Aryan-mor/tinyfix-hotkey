@@ -73,6 +73,7 @@ public static class SkillStoreFile
             Prompt = GetString(item, "prompt", null) ?? PromptRenderer.DefaultCustomPrompt,
             Hotkey = GetString(item, "hotkey", null) ?? "none",
             Enabled = GetBool(item, "enabled", true),
+            KeepOriginalOnClipboard = GetBool(item, "keep_original_on_clipboard", true),
             Builtin = GetBool(item, "builtin", false),
             OfflineFallback = GetBool(item, "offline_fallback", false),
             // A file from before per-skill models: Improve prompt gets the stronger model, the rest keep the default.
@@ -128,6 +129,7 @@ public static class SkillStoreFile
                 w.WriteString("prompt", s.Prompt);
                 w.WriteString("hotkey", s.Hotkey);
                 w.WriteBoolean("enabled", s.Enabled);
+                w.WriteBoolean("keep_original_on_clipboard", s.KeepOriginalOnClipboard);
                 w.WriteBoolean("builtin", s.Builtin);
                 w.WriteBoolean("offline_fallback", s.OfflineFallback);
                 w.WriteString("model_mode", s.ModelMode);
