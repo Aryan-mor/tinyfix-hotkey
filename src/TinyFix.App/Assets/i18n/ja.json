@@ -48,7 +48,7 @@
   "settings.theme_light": "ライト",
   "settings.theme_dark": "ダーク",
   "settings.autostart": "システム起動時に開始",
-  "settings.keep_previous": "変更後も元のテキストをクリップボードに残す",
+  "skills.keep_original": "変更後も元のテキストをクリップボードに残す",
   "settings.change_toast": "変更後に元に戻すボタン付きの通知を表示",
   "status.changed": "{0}：テキストを変更しました",
   "toast.undo": "元に戻す",

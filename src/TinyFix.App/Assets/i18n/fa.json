@@ -48,7 +48,7 @@
   "settings.theme_light": "روشن",
   "settings.theme_dark": "تیره",
   "settings.autostart": "اجرا همراه با سیستم",
-  "settings.keep_previous": "متن اصلی بعد از تغییر در کلیپ‌بورد بماند",
+  "skills.keep_original": "متن اصلی بعد از تغییر در کلیپ‌بورد بماند",
   "settings.change_toast": "بعد از تغییر، پیامی با گزینه بازگردانی نشان بده",
   "status.changed": "{0}: متن تغییر کرد",
   "toast.undo": "بازگردانی",

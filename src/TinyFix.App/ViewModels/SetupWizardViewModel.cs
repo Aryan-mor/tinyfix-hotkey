@@ -334,7 +334,6 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
             Languages.Add(new LanguageOption(code, name));
         _selectedLanguage = Languages.FirstOrDefault(option => option.Code == services.Store.Settings.Language) ?? Languages[0];
         _autostart = services.Platform.Autostart.IsEnabled;
-        _keepPrevious = services.Store.Settings.KeepPreviousOnClipboard;
         _changeToast = services.Store.Settings.ShowChangeToast;
 
         foreach (var protocol in LlmProtocols.All)
@@ -392,21 +391,9 @@ public sealed partial class SetupWizardViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _autostart;
 
-    /// <summary>Leave the text a skill replaced on the clipboard. On unless the user turns it off.</summary>
-    [ObservableProperty]
-    private bool _keepPrevious;
-
     /// <summary>Show the "changed" toast with Undo.</summary>
     [ObservableProperty]
     private bool _changeToast;
-
-    partial void OnKeepPreviousChanged(bool value)
-    {
-        if (_loading)
-            return;
-        _services.Store.Settings.KeepPreviousOnClipboard = value;
-        _services.Store.SaveSettings();
-    }
 
     partial void OnChangeToastChanged(bool value)
     {
