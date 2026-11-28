@@ -63,6 +63,10 @@ Download the file for your system from the [latest release](https://github.com/A
 
 The first start opens a short setup window: the language, an AI model (or "Set up later"), which skills are on and their shortcuts, then a summary with the option to start with the system. Closing the window, skipping, or finishing all count as done, and it does not open again. **Settings → About → Run setup again**, or **Setup...** on the tray icon, opens it any time without clearing what you already saved. A skill still needs a model before it can run. Set `TINYFIX_SKIP_SETUP=1` to start without the window.
 
+## For AI agents
+
+An AI coding agent asked to install or set up TinyFix should read [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md). It covers installing on Windows, macOS and Linux, getting a free Google Gemini API key, and configuring models, skills, shortcuts and settings from the files in the data folder.
+
 ## Run from source
 
 With the .NET 10 SDK:
